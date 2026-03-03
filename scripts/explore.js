@@ -7134,7 +7134,7 @@ function moveBuff(target,buff,mod,turnOverride){
 
 
     let shouldReturn = false
-    if (target==="player" || mod=="self")
+    if (target==="player" || mod=="self" || mod=="team")
     for (const slot in team) {
     if (testAbility(slot, ability.flowerVeil.id ) && buff == "paralysis") shouldReturn = true
     if (testAbility(slot, ability.aromaVeil.id ) && buff == "burn") shouldReturn = true
