@@ -9031,10 +9031,12 @@ function renamePokemon(){
         pkmn[currentEditedPkmn].nickname = document.getElementById("team-name-field").value
 
 
-        if (["crystal", "Crystal", "crystal onix", "Crystal Onix"].includes(document.getElementById("team-name-field").value)){
+        if (currentEditedPkmn == pkmn.onix.id && ["crystal", "Crystal", "crystal onix", "Crystal Onix"].includes(document.getElementById("team-name-field").value)){
                 secretFight(areas.secretOnix.id);
                 document.getElementById("pkmn-editor").style.display = "none"
                 document.getElementById("pokedex-menu").style.display = "none"
+                document.getElementById(`pkmn-editor-current-moves`).innerHTML = ""
+
         }
 
 
