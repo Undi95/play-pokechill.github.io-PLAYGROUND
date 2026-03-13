@@ -1067,7 +1067,7 @@ function leaveCombat(){
 
         if (newIv>ivId) {
             pkmn[hatchedPkmn].ivs[iv] = newIv
-             divTag = `<span>Iv's Up!</span>`
+             divTag = `<span>Ivs Up!</span>`
         }
     }
 
@@ -1178,6 +1178,7 @@ function leaveCombat(){
 
     }
 
+    setSearchTags()
 
 
 
@@ -4825,7 +4826,6 @@ document.getElementById("pokedex-sort-filter").addEventListener("change", e => {
   updatePokedex()
 });
 
-
 document.getElementById("pokedex-search").addEventListener("keydown", e => {
   if (e.key === "Enter") {
     let searchValue = document.getElementById("pokedex-search").value.trim()
@@ -4842,9 +4842,18 @@ document.getElementById("pokedex-search").addEventListener("keydown", e => {
     let allTerms = searchValue.split(/\s+/).filter(t => t !== '')
     let includeTerms = []
     let excludeTerms = []
+    let numericFilters = [] // NEW: Store numeric comparisons
     
     allTerms.forEach(term => {
-      if (term.startsWith('!')) {
+      // NEW: Check for numeric comparison operators
+      const numericMatch = term.match(/^(ivsum|dictionaryTagIvSum)([><=]+)(\d+)$/i)
+      if (numericMatch) {
+        numericFilters.push({
+          field: numericMatch[1].toLowerCase(),
+          operator: numericMatch[2],
+          value: parseInt(numericMatch[3])
+        })
+      } else if (term.startsWith('!')) {
         excludeTerms.push(term.substring(1))
       } else {
         includeTerms.push(term)
@@ -4853,6 +4862,7 @@ document.getElementById("pokedex-search").addEventListener("keydown", e => {
     
     let results = []
     
+    // Get base results from Fuse search
     if (includeTerms.length === 0 && excludeTerms.length > 0) {
       results = fusePkmn.getIndex().docs.map(item => ({ item }))
     } else if (includeTerms.length > 0) {
@@ -4876,73 +4886,75 @@ document.getElementById("pokedex-search").addEventListener("keydown", e => {
         
         results = items.map(item => ({ item }))
       }
+    } else {
+      // NEW: If only numeric filters, start with all Pokemon
+      results = fusePkmn.getIndex().docs.map(item => ({ item }))
     }
 
+    // NEW: Apply numeric filters
+    if (numericFilters.length > 0) {
+      results = results.filter(result => {
+        return numericFilters.every(filter => {
+          const value = result.item.dictionaryTagIvSum || 0
+          
+          switch(filter.operator) {
+            case '>': return value > filter.value
+            case '<': return value < filter.value
+            case '>=': return value >= filter.value
+            case '<=': return value <= filter.value
+            case '=': 
+            case '==': return value === filter.value
+            default: return true
+          }
+        })
+      })
+    }
 
+    //this dumbaah code expands the search to families during x conditions
+    let shouldExpandFamilies = true;
 
+        if (numericFilters.length > 0) {
+      shouldExpandFamilies = false;
+    }
 
-
-
-
-
-
-
-
-
-
-        //this dumbaah code expands the search to families during x conditions
-        let shouldExpandFamilies = true;
-        if (results.length > 0 && includeTerms.length > 0) {
-        let hasAbilityMatch = false;
-        let hasMoveMatch = false;
-                const sampleSize = Math.min(3, results.length);
-        for (let i = 0; i < sampleSize; i++) {
-            const item = results[i].item;
-            includeTerms.forEach(term => {
-            const lowerTerm = term.toLowerCase();
-            if (item.ability && item.ability.toLowerCase().includes(lowerTerm)) hasAbilityMatch = true;
-            if (item.hiddenAbility && item.hiddenAbility.id && item.hiddenAbility.id.toLowerCase().includes(lowerTerm)) hasAbilityMatch = true;
-            if (item.movepool && item.movepool.some(move => move.toLowerCase().includes(lowerTerm))) hasMoveMatch = true;
-            });
-        }
-        
-        if (hasAbilityMatch || hasMoveMatch) {
-            shouldExpandFamilies = false;
-        }
-        }
-
-        let expandedResults = new Set();
-
-        if (shouldExpandFamilies) {
-        results.forEach(result => {
-            const family = getEvolutionFamily(result.item);
-            family.forEach(member => {
-            // only add if the member exists in the current fusePkmn index
-            const memberInIndex = fusePkmn.getIndex().docs.find(doc => doc === member);
-            if (memberInIndex) {
-                expandedResults.add(member);
-            }
-            });
+    if (results.length > 0 && includeTerms.length > 0) {
+      let hasAbilityMatch = false;
+      let hasMoveMatch = false;
+      const sampleSize = Math.min(3, results.length);
+      for (let i = 0; i < sampleSize; i++) {
+        const item = results[i].item;
+        includeTerms.forEach(term => {
+          const lowerTerm = term.toLowerCase();
+          if (item.ability && item.ability.toLowerCase().includes(lowerTerm)) hasAbilityMatch = true;
+          if (item.hiddenAbility && item.hiddenAbility.id && item.hiddenAbility.id.toLowerCase().includes(lowerTerm)) hasAbilityMatch = true;
+          if (item.movepool && item.movepool.some(move => move.toLowerCase().includes(lowerTerm))) hasMoveMatch = true;
         });
-        results = Array.from(expandedResults).map(item => ({ item }));
-        } else {
-        //dont expand family
-        expandedResults = new Set(results.map(r => r.item));
-        results = Array.from(expandedResults).map(item => ({ item }));
-        }
+      }
+      
+      if (hasAbilityMatch || hasMoveMatch) {
+        shouldExpandFamilies = false;
+      }
+    }
 
+    let expandedResults = new Set();
 
-
-
-
-
-
-
-
-
-
-
-
+    if (shouldExpandFamilies) {
+      results.forEach(result => {
+        const family = getEvolutionFamily(result.item);
+        family.forEach(member => {
+          // only add if the member exists in the current fusePkmn index
+          const memberInIndex = fusePkmn.getIndex().docs.find(doc => doc === member);
+          if (memberInIndex) {
+            expandedResults.add(member);
+          }
+        });
+      });
+      results = Array.from(expandedResults).map(item => ({ item }));
+    } else {
+      //dont expand family
+      expandedResults = new Set(results.map(r => r.item));
+      results = Array.from(expandedResults).map(item => ({ item }));
+    }
     
     results = Array.from(expandedResults).map(item => ({ item }))
     
@@ -5346,7 +5358,7 @@ if (document.getElementById("pokedex-search").value!="") {
 
                 pkmn[i].ivs[statToRise]++
                 item[vitaminToUse].got--
-
+                setSearchTags()
                 updatePokedex()
                 
                 if (item[vitaminToUse].got<=0){
@@ -8674,7 +8686,7 @@ if (mod==="end"){
     if (rng(ivChanceSdef) && pkmn[saved.geneticHost].ivs.sdef<Math.min(ivCap, pkmn[saved.geneticSample].ivs.sdef)) {pkmn[saved.geneticHost].ivs.sdef = Math.min(ivCap, pkmn[saved.geneticSample].ivs.sdef) ; summaryTags += `<div style="filter:hue-rotate(200deg)">❖ Special Defense Iv's inherited!</div>`}
     if (rng(ivChanceSpe) && pkmn[saved.geneticHost].ivs.spe<Math.min(ivCap, pkmn[saved.geneticSample].ivs.spe)) {pkmn[saved.geneticHost].ivs.spe = Math.min(ivCap, pkmn[saved.geneticSample].ivs.spe) ; summaryTags += `<div style="filter:hue-rotate(200deg)">❖ Speed Iv's inherited!</div>`}
 
-
+    setSearchTags()
     for (const iv in pkmn[saved.geneticHost].ivs){
         const ivId = pkmn[saved.geneticHost].ivs[iv]
         //let maxIv = 3
@@ -8848,7 +8860,7 @@ training.iv1 = { //disapears if you have more than x ivs
 
     let text = `Increased ${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}!`
     if (parts.length === 1) text = `Increased ${parts[0]}!`;
-
+    setSearchTags()
 
         setTimeout(() => {
         const div = document.createElement("span");
@@ -8902,7 +8914,7 @@ training.iv2 = { //doesnt appear until you have more than x ivs
 
     let text = `Increased ${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}!`
     if (parts.length === 1) text = `Increased ${parts[0]}!`;
-
+    setSearchTags()
 
         setTimeout(() => {
         const div = document.createElement("span");
@@ -8956,7 +8968,7 @@ training.iv3 = { //doesnt appear until you have more than x ivs
 
     let text = `Increased ${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}!`
     if (parts.length === 1) text = `Increased ${parts[0]}!`;
-
+    setSearchTags()
 
         setTimeout(() => {
         const div = document.createElement("span");
