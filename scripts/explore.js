@@ -768,6 +768,7 @@ function exitCombat(){
 
     for (const i in team){
     if (team[i].pkmn==undefined) continue
+    if (pkmn[team[i].pkmn.id].typeTemp && !testAbility(i, ability.protean.id)) pkmn[team[i].pkmn.id].type = pkmn[team[i].pkmn.id].typeTemp
     if (team[i].damageDealt) team[i].damageDealt = 0
     }
 
@@ -3940,7 +3941,10 @@ function initialiseArea(){
     for (const i in pkmn) if (pkmn[i].battling) pkmn[i].battling=undefined
 
     for (const slot in team) {
+    if (team[slot].pkmn==undefined) continue
     if (testAbility(slot, ability.powerOfAlchemy.id)) pkmn[team[slot].pkmn.id].abilityTemp = undefined
+    pkmn[team[slot].pkmn.id].typeTemp = pkmn[team[slot].pkmn.id].type
+
     }
 
 
