@@ -88,6 +88,20 @@ body {
 
 }
 
+#lang-toggle{
+    position: absolute;
+    right: 1rem;
+    bottom: 2.5rem;
+    color: white;
+    font-size: 1.4rem;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+#lang-toggle:hover{
+    opacity: 1;
+}
+
 #debug-panel{
     position: absolute;
     left: 2rem;
