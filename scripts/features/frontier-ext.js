@@ -230,6 +230,17 @@
         color: var(--dark1, #2a1a0a);
         font-style: italic;
       }
+      /* Tooltip header icon — smaller than the tile's 7rem flair. */
+      .frontier-ext-tooltip-icon {
+        display: inline-block;
+        vertical-align: middle;
+      }
+      .frontier-ext-tooltip-icon svg {
+        width: 3rem;
+        height: 3rem;
+        color: var(--light2, #fff);
+        opacity: 0.9;
+      }
     `;
     const style = document.createElement("style");
     style.id = "frontier-ext-css";
@@ -313,7 +324,7 @@
     }
     if (title) {
       title.style.display = "block";
-      title.innerHTML = `${facility.iconEmoji} ${name}`;
+      title.innerHTML = name;
     }
     if (mid) {
       mid.style.display = "block";
@@ -392,7 +403,11 @@
 
     if (top) {
       top.style.display = "block";
-      top.innerHTML = `<span style="display:inline-block; vertical-align: middle; color: var(--light2, #fff);">${facility.iconSvg}</span>`;
+      // Strip the frontier-flair class (which forces 7rem absolute-positioned
+      // sizing meant for the tile) so the tooltip header shows a compact 3rem
+      // icon instead.
+      const compactIcon = facility.iconSvg.replace(/\bclass="frontier-flair"\s*/, "");
+      top.innerHTML = `<span class="frontier-ext-tooltip-icon">${compactIcon}</span>`;
     }
     if (title) {
       title.style.display = "block";
