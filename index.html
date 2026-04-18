@@ -4,8 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pokechill</title>
-    <link rel="icon" type="image/x-icon" href="img/icons/icon.png">
+    <link rel="icon" type="image/x-icon" href="/img/icons/icon.png">
     <link rel="stylesheet" href="styles.css">
+    <script>
+      // i18n overlay: prefix /img/ · /font/ · /scripts/ fetches with the deploy
+      // sub-path (e.g. "/play-pokechill.github.io-FR/") so leading-slash URLs in
+      // game files (movesetGenerator.js preloads SVG icons at load time) resolve
+      // against the repo root instead of the domain root. MUST run before any
+      // other <script> tag so the preloads use the patched fetch.
+      (function(){var o=window.fetch,b=location.pathname.replace(/\/[^/]*$/,"/");
+      window.fetch=function(i,n){if(typeof i==="string"&&/^\/(img|font|scripts)\//.test(i))i=b.replace(/\/$/,"")+i;return o.call(this,i,n)};
+      window.__i18nAssetBase=b;})();
+    </script>
 
 
 
@@ -30,7 +40,6 @@
     </div>
 
     <div id="game-version">v0.1</div>
-    <div id="lang-toggle" onclick="setGameLang(window.gameLang === 'fr' ? 'en' : 'fr')" title="Switch language">🇫🇷</div>
 
 
 
@@ -1705,53 +1714,38 @@ Game Guide
 
     <script src="scripts/HackTimer.js"></script>
     <script src="scripts/fuse.js"></script>
-    <script src="scripts/patch-fr-ui.js"></script>
 
-    <script>
-    (function() {
-      const isFR = localStorage.getItem('pokechill-game-lang') === 'fr';
-      const frOverrides = new Set([
-        'areasDictionary.js',
-        'dictionarySearch.js',
-        'explore.js',
-        'itemDictionary.js',
-        'moveDictionary.js',
-        'shop.js',
-        'tooltip.js',
-        'patch-fr-data.js',
-        'patch-fr.js'
-      ]);
-      const scripts = [
-        'moveDictionary.js',
-        'itemDictionary.js',
-        'pkmnDictionary.js',
-        'areasDictionary.js',
-        'PR/autoTeamBuilding.js',
-        'PR/movesetGenerator.js',
-        'PR/teamDuplicate.js',
-        'PR/updateCheck.js',
-        'script.js',
-        'teams.js',
-        'explore.js',
-        'shop.js',
-        'dictionarySearch.js',
-        'tooltip.js',
-        'decor.js',
-        'save.js'
-      ];
-      if (isFR) {
-        scripts.push('patch-fr-data.js');
-        scripts.push('patch-fr.js');
-      }
-      const currentScript = document.currentScript;
-      scripts.forEach(function(src) {
-        const s = document.createElement('script');
-        s.src = (isFR && frOverrides.has(src) ? 'scripts/fr/' : 'scripts/') + src;
-        s.async = false;
-        currentScript.parentNode.insertBefore(s, currentScript);
-      });
-    })();
-    </script>
+
+    <script src="scripts/moveDictionary.js"></script>
+    <script src="scripts/itemDictionary.js"></script>
+    <script src="scripts/pkmnDictionary.js"></script>
+    <script src="scripts/areasDictionary.js"></script>
+
+    <script src="scripts/PR/autoTeamBuilding.js"></script>
+    <script src="scripts/PR/movesetGenerator.js"></script>
+    <script src="scripts/PR/teamDuplicate.js"></script>
+    <script src="scripts/PR/updateCheck.js"></script>
+    
+
+    <!--
+    <script src="scripts/PR/challengesDictionary.js"></script>
+    <script src="scripts/PR/challenges.js"></script>
+    -->
+
+
+
+    <script src="scripts/script.js"></script>
+    <script src="scripts/teams.js"></script>
+    <script src="scripts/explore.js"></script>
+    <script src="scripts/shop.js"></script>
+    <script src="scripts/dictionarySearch.js"></script>
+    <script src="scripts/tooltip.js"></script>
+    <script src="scripts/decor.js"></script>
+
+    <script src="scripts/save.js"></script>
+<div id="lang-toggle" onclick="setGameLang(window.gameLang === 'fr' ? 'en' : 'fr')" title="Switch language">🇫🇷</div>
+<script src="scripts/i18n/fr.js"></script>
+<script src="scripts/i18n/engine.js"></script>
 </body>
 </html>
 

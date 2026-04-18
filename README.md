@@ -10,67 +10,57 @@ This pull request adds a **complete French translation** to the game while keepi
 
 ### Architecture — Why this is a good PR
 We chose a **self-contained, non-intrusive overlay** so that future updates to the original game are safe and merge-conflict free:
-- **Original files in `scripts/` are untouched.** Only `index.html` and `styles.css` receive minimal modifications.
-- **French overrides live in `scripts/fr/`.** When the player selects French, a small loader in `index.html` redirects only the whitelisted scripts to `scripts/fr/`.
-- **Runtime patches** (`patch-fr.js`, `patch-fr-data.js`) inject French strings (names, descriptions, tooltips) without altering the core dictionaries.
-- **UI translator** (`patch-fr-ui.js`) handles buttons, labels, and dynamically generated DOM text via a `MutationObserver`.
+- **Zero original files modified.** Every file under `scripts/` is byte-identical to upstream. Only `index.html` receives a 3-line edit: one `<div id="lang-toggle">` button and two `<script>` tags.
+- **All translation code lives in `scripts/i18n/`.** The folder ships two JavaScript files:
+  - `engine.js` — **language-agnostic runtime**. Intercepts `innerHTML` / `textContent` / `alert` / attribute writes and observes the DOM via `MutationObserver` so every string passes through a translation lookup *before* being rendered. Also monkey-patches `format()` (the game's universal display helper) to return the localized label, and enriches the `fusePkmn` / `fuseDictionary` Fuse search indexes with French move / ability / type keys.
+  - `fr.js` — **French data only**. `UI_TEXT_MAP` (English string → key), `UI_PARTIALS` (substring substitutions, sorted longest-first), `GAME_UI.en` / `GAME_UI.fr` tables, `LORE_MAP`, `INFO_TRANSLATION_PATTERNS` (regex rewrites for `info()` templates), and the `renameFR` assignments for every Pokémon / move / ability / item / area / field.
+- **Language toggle** stored in `localStorage['pokechill-game-lang']`; the 🇫🇷/🇺🇸 icon at the bottom-right flips it and reloads.
+- **Dex & Dictionary search** accepts French queries (Pokémon name, type, ability, move name — e.g. `Fouet Lianes`, `Fertilisation`, `Charge`) through FR-enriched Fuse keys (`movepoolFR`, `signatureFR`, `eggMoveFR`, `renameFR`, etc.).
 
 ### Files impacted
 | File | Change |
 |------|--------|
-| `index.html` | Adds a synchronous language loader + a language toggle button in the top-right corner. |
-| `styles.css` | Adds styling for `#lang-toggle`. |
-| `scripts/PR/movesetGenerator.js` | Fixes absolute asset paths (`/img/icons/…` → `img/icons/…`) so icons load correctly on GitHub Pages sub-paths. |
-| `scripts/patch-fr-ui.js` | New: global UI dictionary + DOM translator. |
-| `scripts/fr/areasDictionary.js` | New: French names for locations. |
-| `scripts/fr/dictionarySearch.js` | New: French search labels. |
-| `scripts/fr/explore.js` | New: French exploration texts. |
-| `scripts/fr/itemDictionary.js` | New: French item names/descriptions. |
-| `scripts/fr/moveDictionary.js` | New: French move names/descriptions. |
-| `scripts/fr/patch-fr-data.js` | New: safe runtime injector for Pokémon rename/description FR keys. |
-| `scripts/fr/patch-fr.js` | New: central runtime monkey-patch (format, capitalize, Fuse indices, guide, tooltips). |
-| `scripts/fr/shop.js` | New: French shop strings. |
-| `scripts/fr/tooltip.js` | New: French tooltip rendering. |
-| `scripts/fr/README.md` | New: developer documentation for the French layer. |
+| `index.html` | **+3 lines** — one `<div id="lang-toggle">` and two `<script src="scripts/i18n/…">`. |
+| `scripts/i18n/engine.js` | **New.** Language-agnostic runtime: DOM interceptors, `format()` monkey-patch, Fuse enrichment, tooltip helpers, innerHTML hook. |
+| `scripts/i18n/fr.js` | **New.** All French data (UI strings, partials, GAME_UI tables, LORE_MAP, INFO patterns, renameFR assignments). |
+| `scripts/i18n/README.md` | **New.** Onboarding guide for adding a new language (step-by-step for `es`/`de`/etc.), where each string category lives, debugging tips. |
+| `README.md` | Updated with this PR description. |
+| `.gitignore` | **New.** Ignores local translator tooling (audit scanners, Playwright probes, output dirs) so the repo stays clean. |
 
 ### Benefits for maintainers
-1. **Zero risk for English players** — if French files are removed, the game falls back to English instantly.
-2. **Easy to update** — when the original game updates a dictionary, only the matching `scripts/fr/*.js` file needs syncing.
-3. **Clean diff** — the PR diff shows exactly what the translation adds; no unrelated noise.
+1. **Zero risk for English players** — every translation path is gated by `window.gameLang === "fr"`. If `scripts/i18n/` is deleted, the game runs as pure upstream.
+2. **Trivial merges** — no upstream file is patched, so future upstream updates apply without conflict. The overlay only reads runtime values; it doesn't wrap or replace any game module.
+3. **Clean diff** — the PR touches 6 files (2 new overlay scripts + 1 translator README + 1 project README + 1 gitignore + 3-line index.html edit). All other files are byte-identical to upstream.
+4. **Easy to extend** — `scripts/i18n/README.md` documents exactly how to add Spanish, German, etc. The engine is language-agnostic; only the data file needs to be written.
 
 ---
 
 ## 🇫🇷 Français
 
 ### Qu'est-ce que ce PR ?
-Cette pull request ajoute une **traduction complète en français** au jeu, tout en gardant la version anglaise originale intacte à 100 %.
+Cette pull request ajoute une **traduction française complète** au jeu, tout en laissant la version anglaise originale 100 % intacte.
 
 ### Architecture — Pourquoi c'est un bon PR
 Nous avons opté pour une **superposition auto-contenue et non intrusive**, afin que les futures mises à jour du jeu original restent sûres et sans conflit :
-- **Les fichiers originaux dans `scripts/` ne sont pas modifiés.** Seuls `index.html` et `styles.css` reçoivent des changements minimes.
-- **Les surcharges françaises sont dans `scripts/fr/`.** Lorsque le joueur sélectionne le français, un petit chargeur dans `index.html` redirige uniquement les scripts listés vers `scripts/fr/`.
-- **Les patches à l'exécution** (`patch-fr.js`, `patch-fr-data.js`) injectent les chaînes françaises (noms, descriptions, infobulles) sans altérer les dictionnaires de base.
-- **Le traducteur d'interface** (`patch-fr-ui.js`) gère les boutons, libellés et le texte DOM généré dynamiquement via un `MutationObserver`.
+- **Aucun fichier original modifié.** Tous les fichiers sous `scripts/` sont identiques au upstream. Seul `index.html` reçoit 3 lignes : un `<div id="lang-toggle">` et deux balises `<script>`.
+- **Tout le code de traduction vit dans `scripts/i18n/`** — le dossier contient deux fichiers JavaScript :
+  - `engine.js` — **runtime indépendant de la langue**. Intercepte les écritures `innerHTML` / `textContent` / `alert` / attributs, et surveille le DOM via `MutationObserver` pour que chaque chaîne passe par un lookup de traduction *avant* d'être affichée. Monkey-patch aussi `format()` (le helper d'affichage universel du jeu) et enrichit les index de recherche Fuse (`fusePkmn` / `fuseDictionary`) avec des clés FR pour capacités / talents / types.
+  - `fr.js` — **données françaises uniquement**. `UI_TEXT_MAP` (chaîne EN → clé), `UI_PARTIALS` (substitutions de sous-chaînes, triées par longueur décroissante), tables `GAME_UI.en` / `GAME_UI.fr`, `LORE_MAP`, `INFO_TRANSLATION_PATTERNS` (regex pour les templates `info()`), et les assignations `renameFR` pour chaque Pokémon / capacité / talent / objet / zone / champ.
+- **Sélecteur de langue** stocké dans `localStorage['pokechill-game-lang']` ; l'icône 🇫🇷/🇺🇸 en bas à droite bascule et recharge.
+- **Recherche Dex & Dictionnaire** accepte les requêtes françaises (nom de Pokémon, type, talent, nom de capacité — ex. `Fouet Lianes`, `Fertilisation`, `Charge`) via les clés Fuse FR (`movepoolFR`, `signatureFR`, `eggMoveFR`, `renameFR`, etc.).
 
 ### Fichiers impactés
 | Fichier | Modification |
 |---------|--------------|
-| `index.html` | Ajoute un chargeur de langue synchrone + un bouton de basculement en haut à droite. |
-| `styles.css` | Ajoute le style pour `#lang-toggle`. |
-| `scripts/PR/movesetGenerator.js` | Corrige les chemins absolus des assets (`/img/icons/…` → `img/icons/…`) pour que les icônes se chargent correctement sur les sous-chemins GitHub Pages. |
-| `scripts/patch-fr-ui.js` | Nouveau : dictionnaire d'interface global + traducteur DOM. |
-| `scripts/fr/areasDictionary.js` | Nouveau : noms français des lieux. |
-| `scripts/fr/dictionarySearch.js` | Nouveau : libellés de recherche en français. |
-| `scripts/fr/explore.js` | Nouveau : textes d'exploration en français. |
-| `scripts/fr/itemDictionary.js` | Nouveau : noms/descriptions d'objets en français. |
-| `scripts/fr/moveDictionary.js` | Nouveau : noms/descriptions d'attaques en français. |
-| `scripts/fr/patch-fr-data.js` | Nouveau : injecteur sécurisé à l'exécution pour les clés `renameFR`/`descriptionFR` des Pokémon. |
-| `scripts/fr/patch-fr.js` | Nouveau : patch central à l'exécution (`format`, `capitalize`, indices Fuse, guide, infobulles). |
-| `scripts/fr/shop.js` | Nouveau : textes de la boutique en français. |
-| `scripts/fr/tooltip.js` | Nouveau : rendu des infobulles en français. |
-| `scripts/fr/README.md` | Nouveau : documentation développeur pour la couche française. |
+| `index.html` | **+3 lignes** — un `<div id="lang-toggle">` et deux `<script src="scripts/i18n/…">`. |
+| `scripts/i18n/engine.js` | **Nouveau.** Runtime indépendant de la langue : intercepteurs DOM, monkey-patch `format()`, enrichissement Fuse, helpers tooltip, hook innerHTML. |
+| `scripts/i18n/fr.js` | **Nouveau.** Toutes les données françaises (strings UI, partials, tables GAME_UI, LORE_MAP, patterns INFO, assignations renameFR). |
+| `scripts/i18n/README.md` | **Nouveau.** Guide d'intégration pour ajouter une langue (pas-à-pas pour `es`/`de`/etc.), où vit chaque catégorie de strings, conseils de debug. |
+| `README.md` | Mis à jour avec la description de ce PR. |
+| `.gitignore` | **Nouveau.** Ignore les outils locaux du traducteur (scanners d'audit, probes Playwright, dossiers de sortie) pour garder le repo propre. |
 
 ### Avantages pour les mainteneurs
-1. **Zéro risque pour les joueurs anglais** — si les fichiers français sont supprimés, le jeu revient instantanément en anglais.
-2. **Facile à mettre à jour** — quand le jeu original met à jour un dictionnaire, seul le fichier `scripts/fr/*.js` correspondant doit être synchronisé.
-3. **Diff propre** — le diff du PR montre exactement ce que la traduction ajoute ; aucun bruit superflu.
+1. **Zéro risque pour les joueurs anglais** — chaque chemin de traduction est gardé par `window.gameLang === "fr"`. Si `scripts/i18n/` est supprimé, le jeu tourne comme upstream pur.
+2. **Merges triviaux** — aucun fichier upstream n'est patché, donc les futures mises à jour s'appliquent sans conflit. L'overlay ne lit que des valeurs à l'exécution ; il ne wrappe ni ne remplace aucun module du jeu.
+3. **Diff propre** — le PR touche 6 fichiers (2 nouveaux scripts overlay + 1 README traducteur + 1 README projet + 1 gitignore + édition de 3 lignes d'index.html). Tous les autres fichiers sont identiques au upstream.
+4. **Facile à étendre** — `scripts/i18n/README.md` documente exactement comment ajouter l'espagnol, l'allemand, etc. Le moteur est indépendant de la langue ; seul le fichier de données doit être écrit.
