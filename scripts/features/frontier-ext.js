@@ -29,11 +29,16 @@
   // Sprites live in img/trainers/ with canonical Gen 3 Emerald filenames.
   // Icons are SVG strings in the same style as the original frontier-flair
   // icons (single-colour filled paths, 32x32 viewBox-ish).
-  const ICON_PALACE = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 2 3 9v2h26V9zm-10 11v12h2V13zm6 0v12h2V13zm6 0v12h2V13zm6 0v12h2V13zM3 27v3h26v-3z"/></svg>`;
-  const ICON_DOJO = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M3 4c3 2 7 3 13 3s10-1 13-3v4c-3 1-7 2-13 2S6 9 3 8zm3 6v18h3V20h14v8h3V10h-2v7H8v-7zm2 7h6V14H8zm8 0h6v-3h-6z"/></svg>`;
-  const ICON_PIKE = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 2 3 28h26zm-3 14 3 6 3-6-3 4zm-4 8h14v2H9zm-2 3h18v1H7z"/></svg>`;
-  const ICON_PYRAMID = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 2 2 29h28zM12 12l4-7 4 7zm-3 6 7-10 7 10zm-3 6 10-14 10 14z"/></svg>`;
-  const ICON_FACTORY_SECRET = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M4 12v16h8v-5l4 2v-6l4 2v-6l8 3V10zm13 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4m-3 4h6v3h-6zm2-2v-1h2v1z"/></svg>`;
+  // SVG icons in the same style + size as the vanilla frontier-flair icons
+  // (Battle Tower Eiffel, Factory gears). class="frontier-flair" must sit on
+  // the <svg> element itself — styles.css line 5461 sizes it to 7rem × 7rem
+  // absolute-positioned; when the class is on a wrapper <span> the inner SVG
+  // stays at its intrinsic 32px size, which is why the first pass looked tiny.
+  const ICON_PALACE = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 2 2 9v2h28V9zm-11 12v12h2V14zm6 0v12h2V14zm6 0v12h2V14zm6 0v12h2V14zm-15 14v3h24v-3z"/></svg>`;
+  const ICON_DOJO = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M2 4c4 2 8 3 14 3s10-1 14-3v4c-4 1-8 2-14 2S6 9 2 8zm4 8v18h3V20h14v10h3V12h-3v6H9v-6zm3 6h12v-2H9z"/></svg>`;
+  const ICON_PIKE = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 3 2 28h28zm0 7 9 16H7zm-2 8 2 3 2-3-2 2zm-5 8h14v2H9z"/></svg>`;
+  const ICON_PYRAMID = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 2 2 30h28zM6 26l10-18 10 18zm3-1 7-12 7 12zm3-1 4-8 4 8z"/></svg>`;
+  const ICON_FACTORY_SECRET = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M3 13v16h10v-5l5 3v-6l5 3v-6l6 3V11zm14 8a3 3 0 1 1 0-6 3 3 0 0 1 0 6m-2 3h4v4h-4zm1-1v-1h2v1z"/></svg>`;
 
   const FACILITIES = [
     {
@@ -197,17 +202,33 @@
       .frontier-ext-symbol.silver { color: #c0c0c0; text-shadow: 0 0 3px #888; }
       .frontier-ext-symbol.gold   { color: #ffd700; text-shadow: 0 0 3px #b8860b; }
       .frontier-ext-symbol.locked { color: #2a2a2a; }
-      /* Right-click help rule grid inside the tooltip */
+      /* Right-click help rule grid inside the tooltip. Colours picked to
+         contrast with the game's beige/tan tooltipBottom background (light1)
+         — bright orange on beige was unreadable, dark brown/red works. */
       .frontier-ext-help-rules {
         display: grid;
         grid-template-columns: auto 1fr;
-        gap: 0.3rem 0.8rem;
-        padding: 0.5rem 0.8rem;
+        gap: 0.45rem 1rem;
+        padding: 0.7rem 1rem;
         text-align: left;
+        font-size: 0.95rem;
+        color: var(--dark1, #2a1a0a);
       }
       .frontier-ext-help-rules .label {
-        color: #ffc857;
+        color: #7a2e1a;
         font-weight: bold;
+        white-space: nowrap;
+      }
+      .frontier-ext-help-rules .value {
+        color: var(--dark1, #2a1a0a);
+      }
+      .frontier-ext-help-footer {
+        padding: 0.4rem 1rem 0.6rem;
+        opacity: 0.75;
+        font-size: 0.85rem;
+        text-align: center;
+        color: var(--dark1, #2a1a0a);
+        font-style: italic;
       }
     `;
     const style = document.createElement("style");
@@ -236,9 +257,13 @@
     tile.style.setProperty("--hue", facility.hueRotate + "deg");
     tile.dataset.facility = facility.id;
 
+    // Structure mirrors the vanilla Battle Tower / Battle Factory tile in
+    // explore.js line ~7383+ : frontier-flair SVG as a direct child, then the
+    // left label span, then the right-side sprite container.
     tile.innerHTML = `
       <span class="hitbox"></span>
       <div style="width: 100%;">
+        ${facility.iconSvg}
         <span class="explore-ticket-left">
           <span style="font-size:1.2rem">
             ${name}
@@ -250,7 +275,6 @@
             <span class="frontier-ext-symbol ${goldClass}" title="Gold Symbol (round ${GOLD_ROUND})">●</span>
           </span>
         </span>
-        <span class="frontier-flair">${facility.iconSvg}</span>
       </div>
       <div style="width: 8rem;" class="explore-ticket-right">
         <img class="explore-ticket-sprite sprite-trim frontier-ext-brain-icon"
@@ -390,13 +414,13 @@
       bottom.innerHTML = `
         <div class="frontier-ext-help-rules">
           <span class="label">${t.brain}:</span>
-          <span>${brainName}</span>
+          <span class="value">${brainName}</span>
           <span class="label">${t.silverAt} (${t.round} ${SILVER_ROUND}):</span>
-          <span>${teamSilverStr}</span>
+          <span class="value">${teamSilverStr}</span>
           <span class="label">${t.goldAt} (${t.round} ${GOLD_ROUND}):</span>
-          <span>${teamGoldStr}</span>
+          <span class="value">${teamGoldStr}</span>
         </div>
-        <div style="padding: 0.4rem 0.8rem; opacity: 0.7; font-size: 0.9rem; text-align: center;">${t.repeatable}</div>
+        <div class="frontier-ext-help-footer">${t.repeatable}</div>
       `;
     }
   }
