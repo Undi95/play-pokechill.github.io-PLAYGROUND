@@ -27,6 +27,14 @@
   // Each facility is a self-contained spec. `rules.apply(ctx)` is called by the
   // combat wrapper at the right phase (move-select, judge, reward, etc.).
   // Sprites live in img/trainers/ with canonical Gen 3 Emerald filenames.
+  // Icons are SVG strings in the same style as the original frontier-flair
+  // icons (single-colour filled paths, 32x32 viewBox-ish).
+  const ICON_PALACE = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 2 3 9v2h26V9zm-10 11v12h2V13zm6 0v12h2V13zm6 0v12h2V13zm6 0v12h2V13zM3 27v3h26v-3z"/></svg>`;
+  const ICON_DOJO = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M3 4c3 2 7 3 13 3s10-1 13-3v4c-3 1-7 2-13 2S6 9 3 8zm3 6v18h3V20h14v8h3V10h-2v7H8v-7zm2 7h6V14H8zm8 0h6v-3h-6z"/></svg>`;
+  const ICON_PIKE = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 2 3 28h26zm-3 14 3 6 3-6-3 4zm-4 8h14v2H9zm-2 3h18v1H7z"/></svg>`;
+  const ICON_PYRAMID = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 2 2 29h28zM12 12l4-7 4 7zm-3 6 7-10 7 10zm-3 6 10-14 10 14z"/></svg>`;
+  const ICON_FACTORY_SECRET = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M4 12v16h8v-5l4 2v-6l4 2v-6l8 3V10zm13 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4m-3 4h6v3h-6zm2-2v-1h2v1z"/></svg>`;
+
   const FACILITIES = [
     {
       id: "frontierPalace",
@@ -42,9 +50,8 @@
         teamSilver: ["crobat", "lapras", "claydol"],
         teamGold: ["crobat", "lapras", "slaking"],
       },
-      // iconEmoji: "👑", // placeholder — will swap to real SVG later
-      iconEmoji: "🏯",
-      hueRotate: 60, // degrees — tints the tile background
+      iconSvg: ICON_PALACE,
+      hueRotate: 60,
       rules: { autoMoveByNature: true },
     },
     {
@@ -61,7 +68,7 @@
         teamSilver: ["heracross", "umbreon", "hariyama"],
         teamGold: ["hariyama", "shedinja", "medicham"],
       },
-      iconEmoji: "🥋",
+      iconSvg: ICON_DOJO,
       hueRotate: 0,
       rules: { threeTurnJudge: true },
     },
@@ -79,7 +86,7 @@
         teamSilver: ["seviper", "shuckle", "milotic"],
         teamGold: ["seviper", "gyarados", "milotic"],
       },
-      iconEmoji: "🐍",
+      iconSvg: ICON_PIKE,
       hueRotate: -40,
       rules: { chooseDoor: true, persistHpStatus: true, roomCount: 14 },
     },
@@ -97,7 +104,7 @@
         teamSilver: ["regirock", "regice", "registeel"],
         teamGold: ["articuno", "zapdos", "moltres"],
       },
-      iconEmoji: "🔺",
+      iconSvg: ICON_PYRAMID,
       hueRotate: 30,
       rules: { gridNav: true, persistHpStatus: true, gridSize: 7 },
     },
@@ -112,10 +119,10 @@
         sprite: "factory_head_noland",
         nameEn: "Factory Head Noland",
         nameFr: "Maître de l'Usine Philémon",
-        teamSilver: null, // Noland uses random rentals himself, like the player
+        teamSilver: null,
         teamGold: null,
       },
-      iconEmoji: "🏭",
+      iconSvg: ICON_FACTORY_SECRET,
       hueRotate: 160,
       rules: { rentalPool: true, swapAfterWin: true },
     },
@@ -149,9 +156,19 @@
   function injectStyles() {
     if (document.getElementById("frontier-ext-css")) return;
     const css = `
+      /* Whole-tile hue rotation gives each facility its own colour identity. */
       .frontier-ext-tile {
         position: relative;
         filter: hue-rotate(var(--hue, 0deg));
+      }
+      /* Counter-rotate the brain sprite so its colours stay true despite the
+         tile tint. Same trick as the original Battle Factory tile. */
+      .frontier-ext-tile img.frontier-ext-brain-icon {
+        filter: hue-rotate(calc(var(--hue, 0deg) * -1));
+        image-rendering: pixelated;
+        height: 100%;
+        width: auto;
+        max-height: 7rem;
       }
       .frontier-ext-repeatable-tag {
         display: inline-block;
@@ -180,9 +197,17 @@
       .frontier-ext-symbol.silver { color: #c0c0c0; text-shadow: 0 0 3px #888; }
       .frontier-ext-symbol.gold   { color: #ffd700; text-shadow: 0 0 3px #b8860b; }
       .frontier-ext-symbol.locked { color: #2a2a2a; }
-      .frontier-ext-brain-icon {
-        image-rendering: pixelated;
-        filter: drop-shadow(0 0 2px rgba(0,0,0,0.6));
+      /* Right-click help rule grid inside the tooltip */
+      .frontier-ext-help-rules {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.3rem 0.8rem;
+        padding: 0.5rem 0.8rem;
+        text-align: left;
+      }
+      .frontier-ext-help-rules .label {
+        color: #ffc857;
+        font-weight: bold;
       }
     `;
     const style = document.createElement("style");
@@ -214,7 +239,6 @@
     tile.innerHTML = `
       <span class="hitbox"></span>
       <div style="width: 100%;">
-        <span class="frontier-flair" style="font-size: 2rem; display: inline-block; vertical-align: middle; margin-right: 0.3rem;">${facility.iconEmoji}</span>
         <span class="explore-ticket-left">
           <span style="font-size:1.2rem">
             ${name}
@@ -226,15 +250,19 @@
             <span class="frontier-ext-symbol ${goldClass}" title="Gold Symbol (round ${GOLD_ROUND})">●</span>
           </span>
         </span>
+        <span class="frontier-flair">${facility.iconSvg}</span>
       </div>
       <div style="width: 8rem;" class="explore-ticket-right">
         <img class="explore-ticket-sprite sprite-trim frontier-ext-brain-icon"
-             style="z-index: 10; height: 100%;"
+             style="z-index: 10;"
              src="img/trainers/${facility.brain.sprite}.png"
              alt="${facility.brain.nameEn}">
       </div>
     `;
 
+    // Right-click / long-press opens the help tooltip (data-help pattern).
+    tile.dataset.help = "FrontierExt:" + facility.id;
+    // Left-click opens the preview / battle start.
     tile.addEventListener("click", () => openFacilityPreview(facility));
     return tile;
   }
@@ -280,6 +308,99 @@
     if (typeof openTooltip === "function") openTooltip();
   }
 
+  // ─── 6b. HELP TOOLTIP (right-click / long-press) ──────────────────────────
+  // Each tile sets dataset.help = "FrontierExt:<id>". When the game's
+  // right-click handler calls tooltipData("help", that string), we intercept
+  // and fill the tooltip with a rules breakdown specific to the facility.
+  function installHelpTooltip() {
+    if (typeof window.tooltipData !== "function") {
+      setTimeout(installHelpTooltip, 100);
+      return;
+    }
+    const origTooltipData = window.tooltipData;
+    window.tooltipData = function (category, data) {
+      if (category === "help" && typeof data === "string" && data.indexOf("FrontierExt:") === 0) {
+        const facId = data.slice("FrontierExt:".length);
+        const facility = FACILITIES.find((f) => f.id === facId);
+        if (facility) {
+          fillHelpTooltip(facility);
+          if (typeof openTooltip === "function") openTooltip();
+          return;
+        }
+      }
+      return origTooltipData.apply(this, arguments);
+    };
+  }
+
+  function fillHelpTooltip(facility) {
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const name = lang === "fr" ? facility.nameFr : facility.nameEn;
+    const desc = lang === "fr" ? facility.descFr : facility.descEn;
+    const brainName = lang === "fr" ? facility.brain.nameFr : facility.brain.nameEn;
+
+    // Localised labels
+    const t = lang === "fr"
+      ? {
+          rules: "Règles",
+          brain: "Cerveau de la Frontière",
+          silverAt: "Symbole Argent",
+          goldAt: "Symbole Or",
+          teamSilver: "Équipe Argent",
+          teamGold: "Équipe Or",
+          round: "Combat",
+          repeatable: "Affrontable à l'infini — les combats reprennent à zéro à chaque tentative mais les records restent.",
+        }
+      : {
+          rules: "Rules",
+          brain: "Frontier Brain",
+          silverAt: "Silver Symbol",
+          goldAt: "Gold Symbol",
+          teamSilver: "Silver Team",
+          teamGold: "Gold Team",
+          round: "Battle",
+          repeatable: "Fully repeatable — runs reset each attempt but streaks are kept for posterity.",
+        };
+
+    const top = document.getElementById("tooltipTop");
+    const title = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+
+    if (top) {
+      top.style.display = "block";
+      top.innerHTML = `<span style="display:inline-block; vertical-align: middle; color: var(--light2, #fff);">${facility.iconSvg}</span>`;
+    }
+    if (title) {
+      title.style.display = "block";
+      title.innerHTML = name;
+    }
+    if (mid) {
+      mid.style.display = "block";
+      mid.innerHTML = `<div style="padding: 0.4rem 0.8rem; font-style: italic; opacity: 0.9;">${desc}</div>`;
+    }
+    if (bottom) {
+      bottom.style.display = "block";
+      const teamSilverStr = facility.brain.teamSilver
+        ? facility.brain.teamSilver.map((id) => format(id)).join(" · ")
+        : (lang === "fr" ? "Location aléatoire" : "Random rentals");
+      const teamGoldStr = facility.brain.teamGold
+        ? facility.brain.teamGold.map((id) => format(id)).join(" · ")
+        : (lang === "fr" ? "Location aléatoire" : "Random rentals");
+
+      bottom.innerHTML = `
+        <div class="frontier-ext-help-rules">
+          <span class="label">${t.brain}:</span>
+          <span>${brainName}</span>
+          <span class="label">${t.silverAt} (${t.round} ${SILVER_ROUND}):</span>
+          <span>${teamSilverStr}</span>
+          <span class="label">${t.goldAt} (${t.round} ${GOLD_ROUND}):</span>
+          <span>${teamGoldStr}</span>
+        </div>
+        <div style="padding: 0.4rem 0.8rem; opacity: 0.7; font-size: 0.9rem; text-align: center;">${t.repeatable}</div>
+      `;
+    }
+  }
+
   // ─── 7. INJECTION HOOK ────────────────────────────────────────────────────
   // Patch updateFrontier() so our tiles get appended every time the Frontier
   // menu re-renders. Uses the same funcsToHook pattern as the i18n engine.
@@ -312,10 +433,14 @@
   }
 
   // ─── 8. BOOTSTRAP ─────────────────────────────────────────────────────────
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", installInjection);
-  } else {
+  function bootstrap() {
     installInjection();
+    installHelpTooltip();
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bootstrap);
+  } else {
+    bootstrap();
   }
 
   // Expose for debugging from DevTools.
