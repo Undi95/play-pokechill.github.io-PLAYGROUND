@@ -3032,6 +3032,34 @@
     } else {
       trainer = generateTrainer(nextRound, facility);
     }
+
+    // Factory species-overlap dedupe: if the opponent happens to roll a
+    // species already in the player's rental team, the combat engine would
+    // read `pkmn[id]` which is currently overridden with the PLAYER's
+    // rental spec (applyFactoryMoves). Net effect: the opponent fights
+    // with your own stats, and post-battle swap becomes a no-op. Re-roll
+    // any overlap from the same tier pool so every opponent mon is
+    // distinct from your rentals.
+    if (isFactoryFacility(facility) && run.factoryTeam && Array.isArray(trainer.team)) {
+      const rentalIds = new Set(run.factoryTeam.map((r) => r.id));
+      const tierForPool = trainer.tier || 1;
+      const poolForReroll = getPoolForFacility(facility, tierForPool, nextRound);
+      let safety = 0;
+      for (let i = 0; i < trainer.team.length; i++) {
+        while (rentalIds.has(trainer.team[i].id) && safety < 50) {
+          safety++;
+          const newId = poolForReroll[Math.floor(Math.random() * poolForReroll.length)]
+            || pickFromPool(tierForPool);
+          if (!newId || rentalIds.has(newId)) continue;
+          trainer.team[i] = {
+            id: newId,
+            moves: pickMovesetFor(newId),
+            nature: trainer.team[i].nature || simulateNatureFor(newId),
+          };
+        }
+      }
+    }
+
     run.upcomingTrainer = trainer;
 
     const top = document.getElementById("tooltipTop");
@@ -6516,18 +6544,30 @@
       // of a round, the player may trade one of their 3 rentals with one
       // of the defeated opponent's 3. Stash the opponent's team HERE,
       // before upcomingTrainer is nulled out, so the swap modal can
-      // render the candidates. Fresh IVs + ability are rolled per
-      // candidate so the swapped-in mon is a full rental spec.
+      // render the candidates.
+      //
+      // The swap spec captures the opponent's ACTUAL combat stats ("you
+      // take the Pokémon that hit you" — canon Gen 3 Factory): IVs +
+      // ability are snapshotted from pkmn[id] as it stood during the
+      // fight, not re-rolled. Moves + nature come from the NPC trainer
+      // spec. Species overlap with the player's rental team was already
+      // eliminated at trainer-generation time (see openSimulatedFight
+      // dedupe block), so pkmn[id] here reflects the opponent's own
+      // state (either trained by the player in the main game, or the
+      // engine defaults for never-caught species).
       if (isFactoryFacility(facility)
           && run.upcomingTrainer
           && (run.battleInRound || 1) < perRound) {
-        run.pendingFactorySwap = (run.upcomingTrainer.team || []).map((r) => ({
-          id: r.id,
-          moves: r.moves || pickMovesetFor(r.id),
-          nature: r.nature || simulateNatureFor(r.id) || "",
-          ivs: rollFactoryIvs(),
-          ability: rollFactoryAbility(r.id),
-        }));
+        run.pendingFactorySwap = (run.upcomingTrainer.team || []).map((r) => {
+          const p = (typeof pkmn !== "undefined" && pkmn[r.id]) ? pkmn[r.id] : null;
+          return {
+            id: r.id,
+            moves: r.moves || pickMovesetFor(r.id),
+            nature: r.nature || simulateNatureFor(r.id) || "",
+            ivs: (p && p.ivs) ? { ...p.ivs } : { hp: 0, atk: 0, def: 0, satk: 0, sdef: 0, spe: 0 },
+            ability: (p && p.ability) ? p.ability : null,
+          };
+        });
       }
       run.battleInRound = (run.battleInRound || 1) + 1;
       if (run.battleInRound <= perRound) {
