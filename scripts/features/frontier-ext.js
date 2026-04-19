@@ -1535,17 +1535,6 @@
         width: auto;
         max-height: 7rem;
       }
-      .frontier-ext-repeatable-tag {
-        display: inline-block;
-        background: #6ab04c;
-        color: white;
-        font-size: 0.7rem;
-        padding: 0.1rem 0.5rem;
-        border-radius: 0.2rem;
-        margin-left: 0.3rem;
-        vertical-align: middle;
-        letter-spacing: 0.05em;
-      }
       /* Run-in-progress badge — pulsing red pill that appears on the
          one tile where an activeRun is bound. Players see at a glance
          which facility they're committed to, without opening any tile. */
@@ -1673,34 +1662,53 @@
                 drop-shadow(0 0 3px rgba(255,200,70,0.7));
       }
       .frontier-ext-symbol.locked { color: #2a2a2a; }
-      /* Shine sweep — thin highlight diagonally wiping across the medal.
-         Only active on unlocked medals (silver/gold) so locked dots stay
-         flat. Uses mask-image on a wider gradient than the medal itself
-         so the animation cleanly enters/exits. */
+      /* Medal reflection — stable top-left highlight (makes the disc read
+         as 3D / convex) plus a faint bottom-right shadow. Replaces the
+         old diagonal sweep animation that looked like a line moving
+         across. The ::after is masked to a circle so the highlight hugs
+         the medal silhouette. A slow breathing opacity on the halo adds
+         life without the moving-line artefact. */
       .frontier-ext-symbol.silver::after,
       .frontier-ext-symbol.gold::after {
         content: "";
         position: absolute;
-        inset: -10% -25%;
+        inset: 8% 10% 42% 12%;
         pointer-events: none;
-        background: linear-gradient(115deg,
-          transparent 35%,
-          rgba(255,255,255,0.95) 48%,
-          rgba(255,255,255,0.4) 52%,
-          transparent 65%);
+        border-radius: 50%;
+        background: radial-gradient(ellipse at 35% 25%,
+          rgba(255,255,255,0.95) 0%,
+          rgba(255,255,255,0.55) 22%,
+          rgba(255,255,255,0.15) 45%,
+          transparent 72%);
         mix-blend-mode: screen;
-        mask-image: radial-gradient(circle at 50% 50%, #000 55%, transparent 75%);
-        -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 55%, transparent 75%);
-        animation: frontierMedalShine 3.2s ease-in-out infinite;
-        opacity: 0.8;
+        opacity: 0.85;
       }
-      .frontier-ext-symbol.gold::after { animation-delay: 1.1s; opacity: 0.9; }
-      @keyframes frontierMedalShine {
-        0%, 100% { transform: translateX(-140%); opacity: 0; }
-        40%      { opacity: 0.9; }
-        50%      { transform: translateX(0%);    opacity: 0.9; }
-        60%      { opacity: 0.9; }
-        85%      { transform: translateX(140%);  opacity: 0; }
+      .frontier-ext-symbol.silver::before,
+      .frontier-ext-symbol.gold::before {
+        content: "";
+        position: absolute;
+        inset: 55% 14% 5% 18%;
+        pointer-events: none;
+        border-radius: 50%;
+        background: radial-gradient(ellipse at 60% 75%,
+          rgba(0,0,0,0.25) 0%,
+          transparent 70%);
+        pointer-events: none;
+      }
+      .frontier-ext-symbol.silver,
+      .frontier-ext-symbol.gold {
+        animation: frontierMedalBreathe 3.4s ease-in-out infinite;
+      }
+      .frontier-ext-symbol.gold { animation-delay: 0.9s; }
+      @keyframes frontierMedalBreathe {
+        0%, 100% {
+          filter: hue-rotate(calc(var(--hue, 0deg) * -1))
+                  drop-shadow(0 0 2px rgba(255,255,255,0.35));
+        }
+        50% {
+          filter: hue-rotate(calc(var(--hue, 0deg) * -1))
+                  drop-shadow(0 0 5px rgba(255,255,255,0.75));
+        }
       }
       /* Right-click help rule grid inside the tooltip. Colours picked to
          contrast with the game's beige/tan tooltipBottom background (light1)
@@ -2779,7 +2787,6 @@
   function buildTile(facility) {
     const lang = window.gameLang === "fr" ? "fr" : "en";
     const name = lang === "fr" ? facility.nameFr : facility.nameEn;
-    const repeatableLabel = lang === "fr" ? "RECOMMENÇABLE" : "REPEATABLE";
     const streakLabel = lang === "fr" ? "Série" : "Streak";
     const maxLabel = lang === "fr" ? "Record" : "Best";
 
@@ -2844,7 +2851,6 @@
             <strong class="frontier-ext-streak">${streakLabel}: ${streak} / ${maxLabel}: ${maxStreak}</strong>
             <span class="frontier-ext-symbol ${silverClass}" title="Silver Symbol (round ${silverRoundFor(facility)})">●</span>
             <span class="frontier-ext-symbol ${goldClass}" title="Gold Symbol (round ${goldRoundFor(facility)})">●</span>
-            <span class="frontier-ext-repeatable-tag">${repeatableLabel}</span>
             ${inProgressTag}
             ${heatTag}
           </span>
