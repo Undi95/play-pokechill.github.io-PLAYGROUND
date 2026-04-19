@@ -1389,8 +1389,10 @@
       }
       .frontier-ext-factory-grid {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 0.5rem;
+        /* 2 columns → 6 cards fit in 3 rows, giving each card ~50% more
+           horizontal space so IV stars and move names stop wrapping. */
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.55rem;
         padding: 0.4rem 0.6rem;
       }
       .frontier-ext-factory-card {
@@ -1398,12 +1400,17 @@
         background: rgba(0, 0, 0, 0.3);
         border: 2px solid transparent;
         border-radius: 0.4rem;
-        padding: 0.35rem 0.4rem 0.5rem;
-        text-align: center;
+        padding: 0.45rem 0.55rem 0.55rem;
         cursor: pointer;
         transition: transform 0.12s, border-color 0.15s, background 0.15s;
         user-select: none;
         color: #f5e6c8;
+        /* Two-zone card: sprite + identity on the left, IVs/moves on
+           the right. Much more readable at 2-col grid width. */
+        display: grid;
+        grid-template-columns: 5rem 1fr;
+        gap: 0.55rem;
+        align-items: center;
       }
       .frontier-ext-factory-card:hover {
         transform: translateY(-2px);
@@ -1414,71 +1421,87 @@
         border-color: #6ab04c;
         background: rgba(106, 176, 76, 0.25);
       }
+      .frontier-ext-factory-card .card-left {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.1rem;
+      }
+      .frontier-ext-factory-card .card-right {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        min-width: 0;
+      }
       .frontier-ext-factory-card .sprite {
-        width: 4rem;
-        height: 4rem;
+        width: 4.2rem;
+        height: 4.2rem;
         image-rendering: pixelated;
         display: block;
-        margin: 0 auto;
       }
       .frontier-ext-factory-card .name {
         font-weight: bold;
-        font-size: 0.85rem;
-        margin-top: 0.15rem;
+        font-size: 0.88rem;
+        margin-top: 0.1rem;
+        text-align: center;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        max-width: 5rem;
       }
       .frontier-ext-factory-card .nature {
-        font-size: 0.7rem;
-        opacity: 0.75;
+        font-size: 0.72rem;
+        opacity: 0.85;
         font-style: italic;
-        margin-bottom: 0.15rem;
+        text-align: center;
       }
       .frontier-ext-factory-card .ability {
         font-size: 0.72rem;
         color: #ffd17a;
         font-weight: bold;
         text-align: center;
-        margin-bottom: 0.2rem;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        max-width: 5rem;
       }
       .frontier-ext-factory-card .ivs {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 0.08rem 0.2rem;
-        margin-bottom: 0.25rem;
-        font-size: 0.62rem;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.1rem 0.4rem;
+        font-size: 0.72rem;
       }
       .frontier-ext-factory-card .ivs .iv-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 0.2rem;
+        gap: 0.3rem;
       }
       .frontier-ext-factory-card .ivs .iv-row .k {
-        opacity: 0.65;
+        opacity: 0.7;
+        font-weight: bold;
+        min-width: 1.8rem;
       }
       .frontier-ext-factory-card .ivs .iv-row .v {
         color: #ffd700;
-        letter-spacing: -0.08em;
-        font-size: 0.58rem;
+        letter-spacing: 0.02em;
+        font-size: 0.72rem;
+        line-height: 1;
       }
       .frontier-ext-factory-card .moves {
-        display: flex;
-        flex-direction: column;
-        gap: 0.12rem;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.18rem;
       }
       .frontier-ext-factory-card .moves .move {
-        font-size: 0.7rem;
+        font-size: 0.72rem;
         background: rgba(255, 255, 255, 0.08);
-        padding: 0.05rem 0.3rem;
-        border-radius: 0.15rem;
+        padding: 0.12rem 0.4rem;
+        border-radius: 0.2rem;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        text-align: center;
       }
       .frontier-ext-factory-card .pick-badge {
         position: absolute;
@@ -1505,38 +1528,18 @@
         color: #ffd700;
       }
       /* Expand the tooltip container while the Factory rental modal is
-         open so the 6-card grid + counter + action row all fit without
-         scrolling. The class is added by setFactoryModalSizing(true)
-         from openFactoryRentalSelection and cleared on confirm / abandon
-         / cleanup. */
+         open so the 6-card 2×3 grid + counter + action row all fit
+         without scrolling. The class is added by setFactoryModalSizing
+         (true) from openFactoryRentalSelection and cleared on confirm
+         / abandon / cleanup. */
       #tooltipBox.frontier-ext-factory-open {
-        max-height: 92vh !important;
-        max-width: min(52rem, 94vw) !important;
+        max-height: 94vh !important;
+        max-width: min(60rem, 96vw) !important;
         width: auto !important;
       }
       #tooltipBox.frontier-ext-factory-open #tooltipMid {
-        max-height: 78vh;
+        max-height: 80vh;
         overflow-y: auto;
-      }
-      /* Compact the cards a touch so 6 of them fit more comfortably
-         in the 3×2 layout. Keeps the key info (sprite, name, 4 moves)
-         readable while making room for the action buttons. */
-      #tooltipBox.frontier-ext-factory-open .frontier-ext-factory-card {
-        padding: 0.3rem 0.35rem 0.4rem;
-      }
-      #tooltipBox.frontier-ext-factory-open .frontier-ext-factory-card .sprite {
-        width: 3.2rem;
-        height: 3.2rem;
-      }
-      #tooltipBox.frontier-ext-factory-open .frontier-ext-factory-card .name {
-        font-size: 0.82rem;
-      }
-      #tooltipBox.frontier-ext-factory-open .frontier-ext-factory-card .nature {
-        font-size: 0.68rem;
-      }
-      #tooltipBox.frontier-ext-factory-open .frontier-ext-factory-card .moves .move {
-        font-size: 0.68rem;
-        padding: 0.05rem 0.25rem;
       }
       /* ── Battle Pyramid — dungeon map ──────────────────────────────── */
       .frontier-ext-pyr-grid {
@@ -4033,12 +4036,16 @@
           </div>`;
         return `
           <div class="frontier-ext-factory-card ${selected ? "selected" : ""}" data-idx="${idx}">
-            <img src="img/pkmn/sprite/${rental.id}.png" alt="${monName}" class="sprite">
-            <div class="name">${monName}</div>
-            <div class="nature">${natureLabel}</div>
-            <div class="ability">${abilityLabel}</div>
-            ${ivsBlock}
-            <div class="moves">${movesList}</div>
+            <div class="card-left">
+              <img src="img/pkmn/sprite/${rental.id}.png" alt="${monName}" class="sprite">
+              <div class="name">${monName}</div>
+              <div class="nature">${natureLabel}</div>
+              <div class="ability">${abilityLabel}</div>
+            </div>
+            <div class="card-right">
+              ${ivsBlock}
+              <div class="moves">${movesList}</div>
+            </div>
             ${selected ? `<div class="pick-badge">${run.factorySelection.indexOf(idx) + 1}</div>` : ""}
           </div>
         `;
