@@ -4796,6 +4796,10 @@
     ensureSaveSlot();
     const run = saved.frontierExt.activeRun;
     if (!run) return;
+    // Block map access if the tied team is no longer a legal 3. This
+    // catches the "empty team dodges all combats to reach stairs × 7
+    // and wins the round" cheese at its entry point.
+    if (!canRunProceed(facility)) return;
     const state = ensurePyramidFloor(facility);
     if (!state) return;
     setPyramidModalSizing(true);
@@ -4945,6 +4949,12 @@
   function pyramidMovePlayerTo(tx, ty, facility) {
     const run = saved.frontierExt.activeRun;
     if (!run || !run.pyramid) return;
+    // Re-validate the tied team on EVERY tile click — without this, a
+    // map opened with 3 mons could continue to advance after the tied
+    // team was emptied (external edit, pre-fix save). With the guard,
+    // any move that would lead to a stairs-advance or combat is
+    // blocked the moment the team falls below 3.
+    if (!canRunProceed(facility)) return;
     const state = run.pyramid;
     // Must be adjacent + not a wall.
     const dx = Math.abs(tx - state.playerX);
@@ -5055,6 +5065,11 @@
   function pyramidAdvanceFloor(facility) {
     const run = saved.frontierExt.activeRun;
     if (!run || !run.pyramid) return;
+    // Final team-size guard right before any round-victory fires via
+    // the non-combat path (stairs → floor 7 wrap). Without this an
+    // emptied tied team could clear a round by dodging every trainer
+    // tile and walking up stairs 7 times.
+    if (!canRunProceed(facility)) return;
     const nextFloor = run.pyramid.floor + 1;
     if (nextFloor > 7) {
       // All 7 floors cleared — round complete. Set the flag that
@@ -6466,6 +6481,46 @@
     }
   }
 
+  // Size of the team tied to THIS run — the preview slot the player
+  // committed at "start" time. Independent of whatever slot they may
+  // have switched to in the team menu. Used to catch scenarios where
+  // the tied team was emptied mid-run (pre-fix saves, external edits).
+  function tiedTeamSize(run) {
+    if (!run || !run.tiedPreviewSlot) return 0;
+    try {
+      const pt = saved.previewTeams && saved.previewTeams[run.tiedPreviewSlot];
+      if (!pt) return 0;
+      let n = 0;
+      for (const slot of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
+        if (pt[slot] && pt[slot].pkmn) n++;
+      }
+      return n;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  // Central guard called at EVERY in-run interaction point that could
+  // otherwise progress the run without a real fight (clicking a map
+  // tile, walking onto stairs, opening the floor map / swap modal,
+  // launching combat, onRunVictory). Returns true if the run can
+  // safely proceed. Returns false (and pops the team-size error) if:
+  //   • the run exists but the tied preview slot no longer has 3
+  //     filled slots (someone emptied it), OR
+  //   • the run's currently-selected preview team has <3 filled slots
+  //     and the player is about to enter combat on it.
+  // Factory is exempt — rentals replace the player's team entirely.
+  function canRunProceed(facility) {
+    const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
+    if (!run) return true; // no run, nothing to guard
+    if (isFactoryFacility(facility)) return true;
+    if (tiedTeamSize(run) !== 3) {
+      showTeamSizeError(facility);
+      return false;
+    }
+    return true;
+  }
+
   // Team size brought INTO the facility. Every Hoenn facility uses 3 per
   // canonical Gen 3 rules. The Dôme still uses 3 here because the
   // signature rule is "bring 3, pick 2 per match" (see DOME_ACTIVE_SIZE
@@ -6512,7 +6567,9 @@
     // applied (handleRunAction("confirm-dome") path). In that state the
     // preview team has been mutated to 2 slots on purpose, and the size
     // check was already done in handleRunAction("launch") *before* the
-    // mutation happened.
+    // mutation happened. Two-layered validation: the current preview
+    // must have 3 (for the vanilla team-preview menu this opens), AND
+    // the tied slot must still have 3 (catches emptied tied team).
     const domeApplied = run.domeTeamBackup && isDomeFacility(facility);
     if (!domeApplied) {
       const teamSize = currentPreviewTeamSize();
@@ -6520,6 +6577,7 @@
         showTeamSizeError(facility);
         return;
       }
+      if (!canRunProceed(facility)) return;
     }
 
     const nextRound = run.round + 1;
@@ -6605,6 +6663,19 @@
     const run = saved.frontierExt.activeRun;
     if (!run) return;
     const facility = FACILITIES.find((f) => f.id === run.facilityId);
+    // Belt-and-braces: any call site that reaches onRunVictory with an
+    // invalid tied team means something slipped past the per-entry
+    // guards. Refuse to credit the streak and abandon the run instead
+    // of advancing. Factory is exempt (rentals, no tied preview).
+    if (!isFactoryFacility(facility) && tiedTeamSize(run) !== 3) {
+      // Silent abandon — we don't want to fire showTeamSizeError here
+      // since the caller may not be showing a tooltip (leaveCombat
+      // path). Just clear activeRun + unlock team.
+      saved.frontierExt.activeRun = null;
+      try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
+      if (typeof updateFrontier === "function") updateFrontier();
+      return;
+    }
 
     // Dome: victory advances sub-battle first; round only advances when the
     // whole 3-fight bracket is cleared. Symbol checks happen on bracket
