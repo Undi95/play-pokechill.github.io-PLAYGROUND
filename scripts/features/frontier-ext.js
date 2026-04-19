@@ -1303,9 +1303,10 @@
   }
 
   function restoreDomeSelection() {
-    const run = saved.frontierExt.activeRun;
+    const run = saved.frontierExt && saved.frontierExt.activeRun;
     if (!run || !run.domeTeamBackup) return;
-    const pt = saved.previewTeams[run.domeTeamSlot];
+    const ptKey = run.domeTeamSlot || saved.currentPreviewTeam;
+    const pt = saved.previewTeams && saved.previewTeams[ptKey];
     if (pt) {
       for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
         pt[sl] = run.domeTeamBackup[sl];
@@ -1313,6 +1314,30 @@
     }
     run.domeTeamBackup = null;
     run.domeTeamSlot = null;
+  }
+
+  // Runs at bootstrap and on any updateFrontier re-render. If we find a
+  // pending domeTeamBackup but no combat is in progress, that means a
+  // previous run got interrupted between applyDomeSelection() and
+  // restoreDomeSelection() — probably because launchCombat errored or
+  // the page reloaded mid-pick. Restore automatically so the player's
+  // team isn't stuck in a mutated 2-mon state.
+  function recoverCorruptedDomeTeam() {
+    if (typeof saved !== "object" || !saved || !saved.frontierExt) return;
+    const run = saved.frontierExt.activeRun;
+    if (!run || !run.domeTeamBackup) return;
+    // Are we currently mid-combat in a frontier-ext run? If so, the
+    // mutation is intentional; don't restore.
+    if (saved.currentArea === RUN_AREA_ID) return;
+    // Otherwise the team is corrupted. Restore + wipe the dome selection
+    // so the next match starts fresh.
+    try {
+      restoreDomeSelection();
+      run.domeSelection = [];
+      console.info("[frontier-ext] recovered mutated Dôme team from backup");
+    } catch (e) {
+      console.error("[frontier-ext] recovery failed:", e);
+    }
   }
 
   // Dome-specific preview: shows the 3-trainer bracket before launching
@@ -1551,8 +1576,13 @@
       return;
     }
     if (action === "launch") {
-      // For Dôme, "Lancer" opens the 2-of-3 pick screen first; confirm
-      // then calls launchCombat.
+      // Team-size check happens HERE for both Dôme and non-Dôme so the
+      // error path never leaves the team in a mutated state. Dôme needs
+      // 3 Pokémon to START — the pick-2 modal comes next.
+      if (currentPreviewTeamSize() !== 3) {
+        showTeamSizeError(facility);
+        return;
+      }
       if (isDomeFacility(facility)) {
         openDomePokemonSelection(facility);
         return;
@@ -1561,7 +1591,9 @@
       return;
     }
     if (action === "confirm-dome") {
-      // Validated 2-of-3 selection — apply it + actually launch.
+      // Team already validated at "launch" — apply the 2-of-3 mutation
+      // and fire combat. launchCombat skips its own size check when a
+      // dome selection is already applied.
       const r = saved.frontierExt.activeRun;
       if (!r || !Array.isArray(r.domeSelection) || r.domeSelection.length !== DOME_ACTIVE_SIZE) return;
       applyDomeSelection();
@@ -1954,11 +1986,18 @@
     const run = saved.frontierExt.activeRun;
     if (!run || run.facilityId !== facility.id) return;
 
-    // Facility-specific team size check (Dome = 2, others = 3).
-    const teamSize = currentPreviewTeamSize();
-    if (teamSize !== expectedTeamSize(facility)) {
-      showTeamSizeError(facility);
-      return;
+    // Team-size check — skipped if a Dôme selection has already been
+    // applied (handleRunAction("confirm-dome") path). In that state the
+    // preview team has been mutated to 2 slots on purpose, and the size
+    // check was already done in handleRunAction("launch") *before* the
+    // mutation happened.
+    const domeApplied = run.domeTeamBackup && isDomeFacility(facility);
+    if (!domeApplied) {
+      const teamSize = currentPreviewTeamSize();
+      if (teamSize !== 3) {
+        showTeamSizeError(facility);
+        return;
+      }
     }
 
     const nextRound = run.round + 1;
@@ -2164,6 +2203,7 @@
       const res = origUpdateFrontier.apply(this, arguments);
       try {
         ensureSaveSlot();
+        recoverCorruptedDomeTeam();
         injectStyles();
         const listing = document.getElementById("frontier-listing");
         if (!listing) return res;
@@ -2194,6 +2234,11 @@
     installExitRedirect();
     installPalaceMoveHook();
     installPalaceEnemyHook();
+    // Attempt a corrupt-team recovery on boot. Safe if nothing to recover.
+    try {
+      ensureSaveSlot();
+      recoverCorruptedDomeTeam();
+    } catch (e) { /* ignore — saved may not be ready yet */ }
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", bootstrap);
@@ -2233,6 +2278,7 @@
     openDomePokemonSelection,
     applyDomeSelection,
     restoreDomeSelection,
+    recoverCorruptedDomeTeam,
     DOME_BRACKET_SIZE,
     DOME_ACTIVE_SIZE,
     difficultyMultiplier,
