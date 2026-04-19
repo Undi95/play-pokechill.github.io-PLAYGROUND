@@ -422,6 +422,29 @@
     return { sprite, name, gender };
   }
 
+  // Simulate a nature for an NPC Pokémon based on its BST profile so the
+  // Palace auto-move rule can apply to enemies too (they have no real
+  // nature in vanilla). Picks from the 7 Pokechill natures + empty.
+  function simulateNatureFor(pkmnId) {
+    const p = typeof pkmn !== "undefined" ? pkmn[pkmnId] : null;
+    if (!p || !p.bst) return "";
+    const { atk, def, satk, sdef, spe, hp } = p.bst;
+    const physOffense = atk > satk * 1.15;
+    const specOffense = satk > atk * 1.15;
+    const fast = spe >= 100;
+    const bulky = hp + def + sdef >= 260;
+    const wallPhys = def > sdef * 1.25;
+    const wallSpec = sdef > def * 1.25;
+
+    if (bulky && wallPhys) return "bold";
+    if (bulky && wallSpec) return "quiet";
+    if (bulky && hp >= 95) return "relaxed";
+    if (fast && (physOffense || specOffense)) return "jolly";
+    if (physOffense) return "adamant";
+    if (specOffense) return "modest";
+    return ""; // neutral
+  }
+
   function generateTrainer(round, facility) {
     const lang = window.gameLang === "fr" ? "fr" : "en";
     const { sprite, name } = pickSpriteAndName(lang);
@@ -433,7 +456,11 @@
 
     const slots = [1, 2, 3].map(() => {
       const id = pickFromPool(tier);
-      return { id, moves: pickMovesetFor(id) };
+      return {
+        id,
+        moves: pickMovesetFor(id),
+        nature: simulateNatureFor(id),
+      };
     });
 
     return {
@@ -519,7 +546,7 @@
         color: var(--dark1, #2a1a0a);
         font-style: italic;
       }
-      /* Tooltip header icon — smaller than the tile's 7rem flair. */
+      /* Tooltip header — compact SVG icon. */
       .frontier-ext-tooltip-icon {
         display: inline-block;
         vertical-align: middle;
@@ -529,6 +556,17 @@
         height: 3rem;
         color: var(--light2, #fff);
         opacity: 0.9;
+      }
+      /* Brain sprite centred above the rules grid in tooltipBottom. */
+      .frontier-ext-help-brain-wrap {
+        display: flex;
+        justify-content: center;
+        padding: 0.6rem 0 0.3rem;
+      }
+      .frontier-ext-help-brain {
+        max-height: 7rem;
+        image-rendering: pixelated;
+        filter: drop-shadow(0 0 4px rgba(0,0,0,0.5));
       }
       /* Locked state — applied when the player hasn't beaten Pokemon
          Professor Oak in VS yet. Same dim pattern as the shop's locked
@@ -1045,6 +1083,9 @@
         : (lang === "fr" ? "Location aléatoire" : "Random rentals");
 
       bottom.innerHTML = `
+        <div class="frontier-ext-help-brain-wrap">
+          <img class="frontier-ext-help-brain" src="img/trainers/${facility.brain.sprite}.png" alt="${brainName}">
+        </div>
         <div class="frontier-ext-help-rules">
           <span class="label">${t.brain}:</span>
           <span class="value">${brainName}</span>
@@ -1096,35 +1137,37 @@
     return "DEF"; // default for status moves we can't classify
   }
 
-  function pickSlotByNature(member) {
-    if (!member || !member.pkmn || typeof pkmn === "undefined") return null;
-    const pk = pkmn[member.pkmn.id];
-    if (!pk || !pk.moves) return null;
+  // Generic slot-picker by nature. Works for both player (reads nature from
+  // pkmn[id].nature, moves from pkmn[id].moves.slot1..4) and enemy (nature
+  // + moves passed explicitly because NPCs don't have persistent pkmn state).
+  function pickSlotByNatureGeneric(moves1to4, nature) {
+    const weights = NATURE_STYLE_WEIGHTS[(nature || "").toLowerCase()] || NATURE_STYLE_WEIGHTS.none;
 
-    const nature = (pk.nature || "").toLowerCase();
-    const weights = NATURE_STYLE_WEIGHTS[nature] || NATURE_STYLE_WEIGHTS.none;
-
-    // Build list of [slotNumber, moveId, style] for slots that have a move
     const slots = [];
     for (let i = 1; i <= 4; i++) {
-      const mv = pk.moves["slot" + i];
+      const mv = moves1to4[i - 1] || moves1to4["slot" + i];
       if (!mv) continue;
-      slots.push({ slot: i, moveId: mv, style: classifyMoveId(mv) });
+      slots.push({ slot: i, style: classifyMoveId(mv) });
     }
-    if (slots.length === 0) return 1;
+    if (slots.length === 0) return null;
 
     const byStyle = { ATK: [], DEF: [], SUP: [] };
     slots.forEach((s) => byStyle[s.style].push(s.slot));
 
-    // Weighted style pick
     const roll = Math.random() * (weights[0] + weights[1] + weights[2]);
     let targetStyle = "ATK";
     if (roll >= weights[0]) targetStyle = "DEF";
     if (roll >= weights[0] + weights[1]) targetStyle = "SUP";
 
-    // Fall back: if Pokémon has no move of target style, pick any available
     const candidates = byStyle[targetStyle].length ? byStyle[targetStyle] : slots.map((s) => s.slot);
     return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  function pickSlotByNature(member) {
+    if (!member || !member.pkmn || typeof pkmn === "undefined") return null;
+    const pk = pkmn[member.pkmn.id];
+    if (!pk || !pk.moves) return null;
+    return pickSlotByNatureGeneric(pk.moves, pk.nature || "");
   }
 
   function isInPalaceRun() {
@@ -1158,10 +1201,46 @@
       if (active) {
         const newTurn = active.turn;
         if (newTurn !== prevTurn && newTurn !== null && newTurn !== undefined) {
-          // The original just advanced the turn — overwrite with our pick.
           const picked = pickSlotByNature(active);
           if (picked !== null && picked >= 1 && picked <= 4) {
             active.turn = picked;
+          }
+        }
+      }
+      return res;
+    };
+  }
+
+  // Mirror hook for the enemy side (exploreCombatWild). NPC trainers don't
+  // have a real nature — we simulate one per slot at trainer-generation time
+  // and read it back from areas[RUN_AREA_ID].frontierExtNatures[currentTrainerSlot].
+  function installPalaceEnemyHook() {
+    if (typeof window.exploreCombatWild !== "function") {
+      setTimeout(installPalaceEnemyHook, 200);
+      return;
+    }
+    if (window.__palaceEnemyHookInstalled) return;
+    window.__palaceEnemyHookInstalled = true;
+    const orig = window.exploreCombatWild;
+    window.exploreCombatWild = function () {
+      let prevTurn = null;
+      if (isInPalaceRun() && typeof exploreCombatWildTurn !== "undefined") {
+        prevTurn = window.exploreCombatWildTurn;
+      }
+      const res = orig.apply(this, arguments);
+      if (isInPalaceRun() && typeof exploreCombatWildTurn !== "undefined") {
+        const newTurn = window.exploreCombatWildTurn;
+        if (newTurn !== prevTurn && newTurn !== null && newTurn !== undefined) {
+          // Which of the trainer's 3 Pokémon is active? Game tracks this
+          // via the `currentTrainerSlot` global (see explore.js:485+).
+          const slotIdx = typeof currentTrainerSlot !== "undefined" ? currentTrainerSlot : 1;
+          const area = areas[RUN_AREA_ID];
+          if (!area) return res;
+          const nature = (area.frontierExtNatures && area.frontierExtNatures[slotIdx]) || "";
+          const moves = area.team["slot" + slotIdx + "Moves"] || [];
+          const picked = pickSlotByNatureGeneric(moves, nature);
+          if (picked !== null && picked >= 1 && picked <= 4) {
+            window.exploreCombatWildTurn = picked;
           }
         }
       }
@@ -1180,11 +1259,15 @@
     if (typeof areas === "undefined" || typeof pkmn === "undefined") return null;
 
     const team = {};
+    // Parallel array: simulated natures per slot so the Palace rule can look
+    // up the active opponent's nature by slot index at combat time.
+    const naturesBySlot = {};
     trainer.team.forEach((slot, i) => {
       const slotN = i + 1;
       if (!pkmn[slot.id]) return;
       team["slot" + slotN] = pkmn[slot.id];
       team["slot" + slotN + "Moves"] = slot.moves;
+      naturesBySlot[slotN] = slot.nature || simulateNatureFor(slot.id) || "";
     });
 
     areas[RUN_AREA_ID] = {
@@ -1197,13 +1280,13 @@
       type: "vs",
       level: 100,
       team,
+      // Custom field read by the enemy Palace hook (see installPalaceEnemyHook).
+      frontierExtNatures: naturesBySlot,
+      frontierExtFacilityId: facility.id,
       fieldEffect: [],
-      itemReward: {}, // no items for non-boss rounds; boss could add
+      itemReward: {},
       defeated: false,
       hpPercentage: 100,
-      // Called by explore.js when all slots are defeated. We let our
-      // leaveCombat wrapper handle state advancement; here we just mark
-      // the area done so the wrapper can tell victory from defeat.
       encounterEffect: function () {
         /* no-op — handled in leaveCombat hook */
       },
@@ -1275,10 +1358,14 @@
         name: window.gameLang === "fr" ? facility.brain.nameFr : facility.brain.nameEn,
         sprite: facility.brain.sprite,
         team: brainTeam
-          ? brainTeam.map((id) => ({ id, moves: pickMovesetFor(id) }))
+          ? brainTeam.map((id) => ({
+              id,
+              moves: pickMovesetFor(id),
+              nature: simulateNatureFor(id),
+            }))
           : [1, 2, 3].map(() => {
               const id = pickFromPool(3);
-              return { id, moves: pickMovesetFor(id) };
+              return { id, moves: pickMovesetFor(id), nature: simulateNatureFor(id) };
             }),
         tier: 3,
         isBoss: true,
@@ -1423,6 +1510,7 @@
     installHelpTooltip();
     installCombatHook();
     installPalaceMoveHook();
+    installPalaceEnemyHook();
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", bootstrap);
@@ -1451,6 +1539,8 @@
     // Palace rule debug
     classifyMoveId,
     pickSlotByNature,
+    pickSlotByNatureGeneric,
+    simulateNatureFor,
     isInPalaceRun,
     NATURE_STYLE_WEIGHTS,
     // quick helper to reset all runs/symbols for testing
