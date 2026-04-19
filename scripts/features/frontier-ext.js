@@ -1335,10 +1335,8 @@
   // Heal any lingering corruption from earlier buggy saves. Walks every
   // preview team and any team slot containing `null` gets its key
   // deleted — restoring the game's "slot absent = empty" invariant.
-  // Runs on bootstrap and on every updateFrontier() render so a fix
-  // propagates the moment the player opens the Battle Frontier tab.
   function sanitizeNullSlots() {
-    if (typeof saved !== "object" || !saved || !saved.previewTeams) return;
+    if (typeof saved !== "object" || !saved || !saved.previewTeams) return 0;
     let healed = 0;
     for (const key of Object.keys(saved.previewTeams)) {
       const pt = saved.previewTeams[key];
@@ -1352,6 +1350,33 @@
     }
     if (healed > 0) {
       console.info("[frontier-ext] sanitized " + healed + " null preview-team slot(s)");
+    }
+    return healed;
+  }
+
+  // Hook every entry point that reads preview-team slots so the sanitizer
+  // runs BEFORE the game crashes on a null value. explore.js:9915
+  // (arceusCheck) and teams.js:911 (updatePreviewTeam) both blow up on
+  // `pt[slotN].pkmn` when the slot is null.
+  function installTeamSanitizerHooks() {
+    const fnNames = ["updatePreviewTeam", "arceusCheck", "switchMenu"];
+    for (const name of fnNames) {
+      (function wrap(n) {
+        const attempt = () => {
+          if (typeof window[n] !== "function") {
+            setTimeout(attempt, 200);
+            return;
+          }
+          if (window["__frontierExtHook_" + n]) return;
+          window["__frontierExtHook_" + n] = true;
+          const orig = window[n];
+          window[n] = function () {
+            try { sanitizeNullSlots(); } catch (e) { /* ignore */ }
+            return orig.apply(this, arguments);
+          };
+        };
+        attempt();
+      })(name);
     }
   }
 
@@ -2274,12 +2299,29 @@
     installExitRedirect();
     installPalaceMoveHook();
     installPalaceEnemyHook();
+    installTeamSanitizerHooks();
     // Attempt a corrupt-team recovery on boot. Safe if nothing to recover.
     try {
       ensureSaveSlot();
       sanitizeNullSlots();
       recoverCorruptedDomeTeam();
     } catch (e) { /* ignore — saved may not be ready yet */ }
+    // Saved may load asynchronously after script runs — retry the
+    // sanitizer a few times over the first couple seconds so the fix
+    // lands regardless of the game's init ordering.
+    let attempts = 0;
+    const retry = () => {
+      attempts++;
+      try {
+        const healed = sanitizeNullSlots();
+        if (healed > 0 && typeof updatePreviewTeam === "function") {
+          // Refresh the team-editor UI if it's already open.
+          try { updatePreviewTeam(); } catch (e) { /* ignore */ }
+        }
+      } catch (e) { /* ignore */ }
+      if (attempts < 6) setTimeout(retry, 500);
+    };
+    setTimeout(retry, 300);
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", bootstrap);
