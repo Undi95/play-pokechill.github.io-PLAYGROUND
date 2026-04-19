@@ -396,11 +396,11 @@
     const t = lang === "fr"
       ? {
           title: "⚔️ Facilities Secrètes",
-          sub: "Règles Gen 3 originales · Niveau fixé à 50 · Pas de restriction de division",
+          sub: "Règles Gen 3 originales · Pokémon niveau 100 requis · Pas de restriction de division",
         }
       : {
           title: "⚔️ Secret Facilities",
-          sub: "Canonical Gen 3 rules · Open Level 50 · No division restriction",
+          sub: "Canonical Gen 3 rules · Level 100 Pokémon required · No division restriction",
         };
 
     const div = document.createElement("div");
