@@ -4596,6 +4596,29 @@
     // Avoid a trivial collision (shouldn't happen but safe).
     if (stairsX === startX && stairsY === startY) stairsX = (stairsX + 1) % size;
 
+    // Carve a GUARANTEED path from start → stairs BEFORE placing walls.
+    // Without this, random wall placement can cluster into a diagonal
+    // barrier (observed: walls at (1,4)(2,3)(3,2)(4,1) cut off top-left
+    // stairs from bottom-center start). Random L-shape (vertical-first or
+    // horizontal-first) keeps layout variety. Cells on this path are
+    // tagged "protected" and skipped by the wall placer below.
+    const protectedCells = new Set();
+    const cellKey = (x, y) => y * size + x;
+    {
+      const vFirst = Math.random() < 0.5;
+      let px = startX;
+      let py = startY;
+      protectedCells.add(cellKey(px, py));
+      const stepToward = (from, to) => (from < to ? from + 1 : from - 1);
+      if (vFirst) {
+        while (py !== stairsY) { py = stepToward(py, stairsY); protectedCells.add(cellKey(px, py)); }
+        while (px !== stairsX) { px = stepToward(px, stairsX); protectedCells.add(cellKey(px, py)); }
+      } else {
+        while (px !== stairsX) { px = stepToward(px, stairsX); protectedCells.add(cellKey(px, py)); }
+        while (py !== stairsY) { py = stepToward(py, stairsY); protectedCells.add(cellKey(px, py)); }
+      }
+    }
+
     // Place walls
     const wallCount = Math.floor(size * size * 0.18);
     let placedWalls = 0, safety = 0;
@@ -4605,9 +4628,45 @@
       const y = Math.floor(Math.random() * size);
       if (x === startX && y === startY) continue;
       if (x === stairsX && y === stairsY) continue;
+      if (protectedCells.has(cellKey(x, y))) continue; // keep the carved path open
       if (grid[y][x] !== PYR_TILES.EMPTY) continue;
       grid[y][x] = PYR_TILES.WALL;
       placedWalls++;
+    }
+
+    // Safety net: if the carve above somehow failed or a future change
+    // skips it, BFS-verify reachability and break a wall if blocked.
+    const isReachable = () => {
+      const seen = new Set([cellKey(startX, startY)]);
+      const queue = [[startX, startY]];
+      while (queue.length) {
+        const [cx, cy] = queue.shift();
+        if (cx === stairsX && cy === stairsY) return true;
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const nx = cx + dx, ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+          const k = cellKey(nx, ny);
+          if (seen.has(k)) continue;
+          if (grid[ny][nx] === PYR_TILES.WALL) continue;
+          seen.add(k);
+          queue.push([nx, ny]);
+        }
+      }
+      return false;
+    };
+    let breakSafety = 0;
+    while (!isReachable() && breakSafety < 30) {
+      breakSafety++;
+      // Find any wall and remove it; fall through until BFS succeeds.
+      const walls = [];
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          if (grid[y][x] === PYR_TILES.WALL) walls.push([x, y]);
+        }
+      }
+      if (!walls.length) break;
+      const [wx, wy] = walls[Math.floor(Math.random() * walls.length)];
+      grid[wy][wx] = PYR_TILES.EMPTY;
     }
 
     // Place stairs (last floor stairs handled specially by runVictory).
@@ -4661,13 +4720,47 @@
     };
   }
 
+  // BFS check — is the stairs tile reachable from the player's current
+  // position? Used as both a load-time migration guard (old saves with
+  // unwinnable layouts) and a defense-in-depth against future generator
+  // regressions.
+  function pyramidFloorIsSolvable(state) {
+    if (!state || !Array.isArray(state.grid)) return true;
+    const size = state.grid.length;
+    const sx = state.playerX, sy = state.playerY;
+    const tx = state.stairsX, ty = state.stairsY;
+    const seen = new Set([sy * size + sx]);
+    const queue = [[sx, sy]];
+    while (queue.length) {
+      const [cx, cy] = queue.shift();
+      if (cx === tx && cy === ty) return true;
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= size || ny >= size) continue;
+        const k = ny * size + nx;
+        if (seen.has(k)) continue;
+        if (state.grid[ny][nx] === PYR_TILES.WALL) continue;
+        seen.add(k);
+        queue.push([nx, ny]);
+      }
+    }
+    return false;
+  }
+
   // Lazy init — called from start / advanceFloor / continue paths.
+  // Also auto-heals unwinnable floors left over from older saves: if the
+  // stairs are not reachable from the player's current tile, regenerate
+  // the floor in place (keeping the floor number + isLastFloor flag).
   function ensurePyramidFloor(facility) {
     const run = saved.frontierExt.activeRun;
     if (!run) return null;
     if (!run.pyramid) {
       const floor = 1;
       run.pyramid = generatePyramidFloor(facility, floor, floor === 7);
+    } else if (!pyramidFloorIsSolvable(run.pyramid)) {
+      const prevFloor = run.pyramid.floor || 1;
+      const prevLast = !!run.pyramid.isLastFloor;
+      run.pyramid = generatePyramidFloor(facility, prevFloor, prevLast);
     }
     return run.pyramid;
   }
