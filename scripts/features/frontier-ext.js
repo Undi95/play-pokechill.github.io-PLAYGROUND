@@ -1,23 +1,29 @@
 // ============================================
-// BATTLE FRONTIER EXTENSION — fidèle à Pokémon Emeraude
+// BATTLE FRONTIER EXTENSION — Hoenn Gen 3 ruleset (Pokémon Emerald)
 // ============================================
 //
-// Adds 5 additional facilities to the existing Battle Frontier menu:
-//   • Palais de Combat (Battle Palace)     — auto-move by nature
-//   • Dojo de Combat   (Battle Arena)      — 3-turn judged rounds
-//   • Pic de Combat    (Battle Pike)       — 3-door choose-your-fate, HP/status persist
-//   • Pyramide de Combat (Battle Pyramid)  — dungeon grid with random encounters
-//   • Usine Secrète    (Hidden Factory)    — full-random rentals + swap after win
+// Adds 7 "(Hoenn)" facilities to the existing Battle Frontier menu — each
+// labelled with the Hoenn region where the Gen 3 Battle Frontier lived:
+//   • Tour de Combat (Hoenn)       — trainer gauntlet, brain Anabel
+//   • Palais de Combat (Hoenn)     — auto-move by nature, brain Spenser
+//   • Arène de Combat (Hoenn)      — 3-turn judge system, brain Greta
+//   • Dôme de Combat (Hoenn)       — single-elim bracket, brain Tucker
+//   • Usine de Combat (Hoenn)      — random rentals + swap, brain Noland
+//   • Pic de Combat (Hoenn)        — 3-door choose-your-fate, brain Lucy
+//   • Pyramide de Combat (Hoenn)   — dungeon grid, brain Brandon
 //
 // Canonical Gen 3 rules:
 //   • Battle 7   → Silver Symbol (Frontier Brain 1st fight)
 //   • Battle 49  → Gold   Symbol (Frontier Brain rematch, upgraded team)
-//   • All facilities are "Repeatable" — replayable infinitely, unlike VS trainers.
+//   • All facilities are "Repeatable" — replayable infinitely.
+//   • Teams of 3 Pokémon, level 100 required.
 //
 // Same overlay pattern as scripts/i18n/:
 //   • No original game file touched.
 //   • Injected via one <script> tag in index.html.
 //   • Data-driven (FACILITIES array) — easy to tweak rules or add more.
+//   • Internal facility IDs keep the `...Secret` suffix for save-compat
+//     (switching to `...Hoenn` would wipe existing streak/symbol records).
 //
 // ============================================
 (function () {
@@ -51,7 +57,7 @@
   const ICON_PYRAMID = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 3 3 29h26zm0 5-9 16h18zm0 3-6 11h12zm0 3-3 6h6z"/></svg>`;
 
   // 7 secret variants that mirror the 7 canonical Gen 3 Emerald facilities.
-  // Suffixed "(secrète)" / "(secret)" so they read as bonus-content companions
+  // Suffixed "(Hoenn)" / "(Hoenn)" so they read as bonus-content companions
   // to whatever vanilla Pokechill ships (Tour, Usine, Arène — different rules).
   //
   // All use backgrounds that already exist in img/bg/ so we don't have to ship
@@ -59,8 +65,8 @@
   const FACILITIES = [
     {
       id: "frontierTowerSecret",
-      nameEn: "Battle Tower (secret)",
-      nameFr: "Tour de Combat (secrète)",
+      nameEn: "Battle Tower (Hoenn)",
+      nameFr: "Tour de Combat (Hoenn)",
       descEn: "Trainer gauntlet — unlike the vanilla Tower's wild waves, this is a streak of fights against trainers. Pick your team and survive as long as you can.",
       descFr: "Enchaînement de dresseurs — contrairement à la Tour classique (vagues sauvages), ici ce sont des combats 100% dresseurs. Compose ton équipe et tiens le plus longtemps.",
       brain: {
@@ -78,8 +84,8 @@
     },
     {
       id: "frontierPalaceSecret",
-      nameEn: "Battle Palace (secret)",
-      nameFr: "Palais de Combat (secrète)",
+      nameEn: "Battle Palace (Hoenn)",
+      nameFr: "Palais de Combat (Hoenn)",
       descEn: "Your Pokémon pick moves on their own, guided by their nature. No player input during attacks.",
       descFr: "Tes Pokémon choisissent leurs capacités seuls selon leur nature. Aucun contrôle pendant les attaques.",
       brain: {
@@ -97,8 +103,8 @@
     },
     {
       id: "frontierArenaSecret",
-      nameEn: "Battle Arena (secret)",
-      nameFr: "Arène de Combat (secrète)",
+      nameEn: "Battle Arena (Hoenn)",
+      nameFr: "Arène de Combat (Hoenn)",
       descEn: "3 turns max per battle. If neither side KOs, judges decide based on Mind / Skill / Body scores.",
       descFr: "3 tours max par combat. Si aucun K.O., le jury décide selon Esprit / Technique / Corps.",
       brain: {
@@ -116,8 +122,8 @@
     },
     {
       id: "frontierDomeSecret",
-      nameEn: "Battle Dome (secret)",
-      nameFr: "Dôme de Combat (secrète)",
+      nameEn: "Battle Dome (Hoenn)",
+      nameFr: "Dôme de Combat (Hoenn)",
       descEn: "Single-elimination tournament — beat 4 trainers in a bracket per tour. You see each opponent's team ahead of time and pick 2 of your Pokémon.",
       descFr: "Tournoi à élimination directe — bats 4 dresseurs en bracket par tour. Tu vois l'équipe de chaque adversaire à l'avance et choisis 2 de tes Pokémon.",
       brain: {
@@ -135,8 +141,8 @@
     },
     {
       id: "frontierFactorySecret",
-      nameEn: "Battle Factory (secret)",
-      nameFr: "Usine de Combat (secrète)",
+      nameEn: "Battle Factory (Hoenn)",
+      nameFr: "Usine de Combat (Hoenn)",
       descEn: "Get 3 rental Pokémon from a random pool. After each win, you can swap one of yours with the defeated opponent's. Pure Gen 3 Factory rules.",
       descFr: "Choisis 3 Pokémon de location dans un pool aléatoire. Après chaque victoire, tu peux échanger un des tiens avec un de l'adversaire. Règles Factory Gen 3 pures.",
       brain: {
@@ -154,8 +160,8 @@
     },
     {
       id: "frontierPikeSecret",
-      nameEn: "Battle Pike (secret)",
-      nameFr: "Pic de Combat (secrète)",
+      nameEn: "Battle Pike (Hoenn)",
+      nameFr: "Pic de Combat (Hoenn)",
       descEn: "14 rooms. Pick one of three doors per room: battle, wild, heal, trap, or mystery. HP and status persist.",
       descFr: "14 salles. Choisis une des trois portes à chaque salle : combat, sauvage, soin, piège ou mystère. PV et statuts persistent.",
       brain: {
@@ -173,8 +179,8 @@
     },
     {
       id: "frontierPyramidSecret",
-      nameEn: "Battle Pyramid (secret)",
-      nameFr: "Pyramide de Combat (secrète)",
+      nameEn: "Battle Pyramid (Hoenn)",
+      nameFr: "Pyramide de Combat (Hoenn)",
       descEn: "Navigate a 7x7 grid. Hidden trainers, wild waves, items, and traps. HP and status persist. Find the stairs to advance.",
       descFr: "Navigue une grille 7x7. Dresseurs cachés, vagues sauvages, objets et pièges. PV et statuts persistent. Trouve l'escalier pour avancer.",
       brain: {
@@ -623,12 +629,12 @@
     const lang = window.gameLang === "fr" ? "fr" : "en";
     const t = lang === "fr"
       ? {
-          title: "⚔️ Facilities Secrètes",
-          sub: "Règles Gen 3 originales · Pokémon niveau 100 requis · Pas de restriction de division",
+          title: "⚔️ Zone de Combat — Hoenn",
+          sub: "Règles Gen 3 d'Emeraude · Pokémon niveau 100 requis · Équipes de 3 · Pas de restriction de division",
         }
       : {
-          title: "⚔️ Secret Facilities",
-          sub: "Canonical Gen 3 rules · Level 100 Pokémon required · No division restriction",
+          title: "⚔️ Battle Frontier — Hoenn",
+          sub: "Gen 3 Emerald rules · Level 100 Pokémon required · Teams of 3 · No division restriction",
         };
 
     const div = document.createElement("div");
