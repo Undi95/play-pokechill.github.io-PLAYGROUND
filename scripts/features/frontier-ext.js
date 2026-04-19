@@ -266,18 +266,14 @@
   // Every filename below verified present in img/trainers/ (tree listed
   // against ls(img/trainers/)).
   const GENERIC_SPRITES_M = [
-    "aceTrainerSnowM","birdkeeper","blackBelt","bugCatcher","firebreather",
-    "gentleman","hiker","hiker2","pokemaniac","rocketGruntM","sailor",
+    "aceTrainerSnowM","artist","blackBelt","bugCatcher","channeler","clown",
+    "firebreather","gentleman","hiker","hiker2","janitor","pokemaniac",
+    "rocketGruntM","sailor","schoolKid","scientist","swimmer","veteran",
     "worker","youngster",
   ];
   const GENERIC_SPRITES_F = [
-    "aceTrainerSnowF","aromaLady","battlegirl","beauty","hexmaniac",
-    "madame","rocketGruntF",
-  ];
-  const GENERIC_SPRITES_N = [
-    // ambiguous / could be either gender — name is picked from M or F list at random
-    "artist","channeler","clown","janitor","psychic","schoolKid","scientist",
-    "swimmer","veteran",
+    "aceTrainerSnowF","aromaLady","battlegirl","beauty","birdkeeper",
+    "hexmaniac","madame","psychic","rocketGruntF",
   ];
   const TRAINER_NAMES_FR_M = [
     "Jean-Baptiste","Hugo","Mathis","Alexandre","Tristan","Raphaël","Nicolas",
@@ -400,20 +396,19 @@
   // Pick a sprite + a gender-matching name. Neutral sprites get a random
   // pick from either name pool so we don't accidentally pair e.g. a
   // "beauty" sprite with "Gabriel" or a "blackBelt" sprite with "Lucie".
+  // Pick a sprite + a gender-matching name. Probability reflects bucket size
+  // roughly (22 M : 7 F), but floored at 30% F so women show up often enough.
   function pickSpriteAndName(lang) {
     const roll = Math.random();
-    let gender, sprite;
-    if (roll < 0.4) {
+    let gender, pool;
+    if (roll < 0.7) {
       gender = "M";
-      sprite = GENERIC_SPRITES_M[Math.floor(Math.random() * GENERIC_SPRITES_M.length)];
-    } else if (roll < 0.8) {
-      gender = "F";
-      sprite = GENERIC_SPRITES_F[Math.floor(Math.random() * GENERIC_SPRITES_F.length)];
+      pool = GENERIC_SPRITES_M;
     } else {
-      // Neutral sprite — randomize name gender
-      gender = Math.random() < 0.5 ? "M" : "F";
-      sprite = GENERIC_SPRITES_N[Math.floor(Math.random() * GENERIC_SPRITES_N.length)];
+      gender = "F";
+      pool = GENERIC_SPRITES_F;
     }
+    const sprite = pool[Math.floor(Math.random() * pool.length)];
     const nameList = lang === "fr"
       ? (gender === "M" ? TRAINER_NAMES_FR_M : TRAINER_NAMES_FR_F)
       : (gender === "M" ? TRAINER_NAMES_EN_M : TRAINER_NAMES_EN_F);
