@@ -5590,6 +5590,37 @@
     };
   }
 
+  // Capture-phase right-click / long-press blocker that stops the
+  // game's tooltip.js contextmenu handler from opening the Pokémon
+  // editor on any team sprite during an active frontier run. Without
+  // this, players can right-click a team member mid-combat, edit moves
+  // on their own Pokémon, and walk back into the fight with the new
+  // moveset. Scoped to #explore-team (combat sidebar) + #team-preview
+  // (team menu) so Pokédex / storage / other contexts stay usable.
+  function installFrontierRightClickBlock() {
+    if (window.__frontierExtContextBlock) return;
+    window.__frontierExtContextBlock = true;
+    const shouldBlock = (e) => {
+      if (typeof saved !== "object" || !saved) return false;
+      if (!saved.frontierExt || !saved.frontierExt.activeRun) return false;
+      const target = e.target && e.target.closest
+        ? e.target.closest("[data-pkmn-editor]")
+        : null;
+      if (!target) return false;
+      const exploreTeam = document.getElementById("explore-team");
+      const teamPreview = document.getElementById("team-preview");
+      return (exploreTeam && exploreTeam.contains(target))
+          || (teamPreview && teamPreview.contains(target));
+    };
+    const blocker = (e) => {
+      if (!shouldBlock(e)) return;
+      try { e.preventDefault(); } catch (_) {}
+      try { e.stopImmediatePropagation(); } catch (_) {}
+      try { e.stopPropagation(); } catch (_) {}
+    };
+    document.addEventListener("contextmenu", blocker, { capture: true });
+  }
+
   // Capture-phase event filter at the document level. This is the
   // ultimate safety net — it fires BEFORE any game listener (the game's
   // own dragstart/click/touchstart handlers on slot cards, held-item
@@ -6309,6 +6340,7 @@
     installTeamMenuLockHook();
     installTeamMenuObserver();
     installTeamLockEventFilter();
+    installFrontierRightClickBlock();
     installLivePillHooks();
     // Attempt a corrupt-team recovery on boot. Safe if nothing to recover.
     try {
