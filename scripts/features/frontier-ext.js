@@ -1279,27 +1279,37 @@
     openDomePokemonSelection(facility); // re-render
   }
 
-  // Snapshot + clear the unselected slot(s) of the preview team so the
-  // combat engine only sees the 2 chosen mons. Store the snapshot on the
-  // run so we can restore everything in the leaveCombat hook.
+  // IMPORTANT: the game represents "empty slot" as the key being ABSENT
+  // from the preview-team object (initialised as `saved.previewTeams.preview1
+  // = {}` in teams.js:4). Never write `null` into a slot — it corrupts the
+  // save and the team editor can't recover the slot afterwards. Use
+  // `delete pt.slotN` instead.
   function applyDomeSelection() {
     const run = saved.frontierExt.activeRun;
     if (!run || !Array.isArray(run.domeSelection)) return;
     const pt = saved.previewTeams[saved.currentPreviewTeam];
     if (!pt) return;
+    // Snapshot every slot (even absent ones are captured as undefined).
     const backup = {};
     for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
-      backup[sl] = pt[sl];
+      // `in` catches both "present but undefined" and real assignments.
+      if (sl in pt) backup[sl] = pt[sl];
     }
     run.domeTeamBackup = backup;
     run.domeTeamSlot = saved.currentPreviewTeam;
-    // Rewrite slots: selected mons into slot1/slot2, others cleared.
-    const selectedSlots = run.domeSelection.slice(0, DOME_ACTIVE_SIZE);
-    const newSlots = { slot1: null, slot2: null, slot3: null, slot4: null, slot5: null, slot6: null };
-    selectedSlots.forEach((srcSlot, i) => {
-      newSlots["slot" + (i + 1)] = pt[srcSlot];
+
+    // Capture the selected mons' data BEFORE any mutation.
+    const selectedData = run.domeSelection
+      .slice(0, DOME_ACTIVE_SIZE)
+      .map((srcSlot) => pt[srcSlot]);
+    // Wipe every slot by deleting the key (not nulling it).
+    for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
+      delete pt[sl];
+    }
+    // Place selected mons in slot1 / slot2.
+    selectedData.forEach((data, i) => {
+      if (data) pt["slot" + (i + 1)] = data;
     });
-    Object.assign(pt, newSlots);
   }
 
   function restoreDomeSelection() {
@@ -1308,12 +1318,41 @@
     const ptKey = run.domeTeamSlot || saved.currentPreviewTeam;
     const pt = saved.previewTeams && saved.previewTeams[ptKey];
     if (pt) {
+      // Clear current state cleanly first (delete, not null).
       for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
+        delete pt[sl];
+      }
+      // Re-apply backup — only for slots that originally had data (the
+      // backup's own key presence mirrors the pre-mutation pt object).
+      for (const sl of Object.keys(run.domeTeamBackup)) {
         pt[sl] = run.domeTeamBackup[sl];
       }
     }
     run.domeTeamBackup = null;
     run.domeTeamSlot = null;
+  }
+
+  // Heal any lingering corruption from earlier buggy saves. Walks every
+  // preview team and any team slot containing `null` gets its key
+  // deleted — restoring the game's "slot absent = empty" invariant.
+  // Runs on bootstrap and on every updateFrontier() render so a fix
+  // propagates the moment the player opens the Battle Frontier tab.
+  function sanitizeNullSlots() {
+    if (typeof saved !== "object" || !saved || !saved.previewTeams) return;
+    let healed = 0;
+    for (const key of Object.keys(saved.previewTeams)) {
+      const pt = saved.previewTeams[key];
+      if (!pt || typeof pt !== "object") continue;
+      for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
+        if (pt[sl] === null) {
+          delete pt[sl];
+          healed++;
+        }
+      }
+    }
+    if (healed > 0) {
+      console.info("[frontier-ext] sanitized " + healed + " null preview-team slot(s)");
+    }
   }
 
   // Runs at bootstrap and on any updateFrontier re-render. If we find a
@@ -2203,6 +2242,7 @@
       const res = origUpdateFrontier.apply(this, arguments);
       try {
         ensureSaveSlot();
+        sanitizeNullSlots();
         recoverCorruptedDomeTeam();
         injectStyles();
         const listing = document.getElementById("frontier-listing");
@@ -2237,6 +2277,7 @@
     // Attempt a corrupt-team recovery on boot. Safe if nothing to recover.
     try {
       ensureSaveSlot();
+      sanitizeNullSlots();
       recoverCorruptedDomeTeam();
     } catch (e) { /* ignore — saved may not be ready yet */ }
   }
@@ -2279,6 +2320,7 @@
     applyDomeSelection,
     restoreDomeSelection,
     recoverCorruptedDomeTeam,
+    sanitizeNullSlots,
     DOME_BRACKET_SIZE,
     DOME_ACTIVE_SIZE,
     difficultyMultiplier,
