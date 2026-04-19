@@ -199,10 +199,35 @@
   ];
 
   // ─── 2. BRAIN BATTLE TRIGGERS ─────────────────────────────────────────────
-  // Same for every facility per user spec: brain appears at round 7 (Silver)
-  // and round 49 (Gold rematch with upgraded team).
+  // Same for every facility per user spec:
+  //   round 7   → Silver Symbol (first brain fight)
+  //   round 49  → Gold   Symbol (rematch with upgraded team)
+  //   round 56+ → every 7 rounds past 49, the brain returns with an
+  //               incremented difficulty multiplier (permanent post-Gold
+  //               endless challenge — universal rule across all 7
+  //               Hoenn facilities).
   const SILVER_ROUND = 7;
   const GOLD_ROUND = 49;
+  const POST_GOLD_BOSS_EVERY = 7;
+
+  // Difficulty multiplier — 1 up to Gold, then +1 per 7-round boss cycle.
+  function difficultyMultiplier(round) {
+    if (round <= GOLD_ROUND) return 1;
+    return 1 + Math.floor((round - GOLD_ROUND) / POST_GOLD_BOSS_EVERY);
+  }
+
+  // Returns a descriptor { kind, multiplier } for boss rounds, or null.
+  //   kind === "silver"  : round 7
+  //   kind === "gold"    : round 49
+  //   kind === "rematch" : round 56, 63, 70 … (every 7 past Gold)
+  function getBossRoundInfo(round) {
+    if (round === SILVER_ROUND) return { kind: "silver", multiplier: 1 };
+    if (round === GOLD_ROUND) return { kind: "gold", multiplier: 1 };
+    if (round > GOLD_ROUND && (round - GOLD_ROUND) % POST_GOLD_BOSS_EVERY === 0) {
+      return { kind: "rematch", multiplier: difficultyMultiplier(round) };
+    }
+    return null;
+  }
 
   // ─── 2b. ACCESS GATE ──────────────────────────────────────────────────────
   // All 7 secret facilities are locked until the player defeats Pokemon
@@ -301,101 +326,170 @@
     "Anna","Ivy",
   ];
 
-  // Pokémon pool for non-boss trainers, tagged by difficulty tier. Tier grows
-  // with the round so round-1 trainers feel different from round-6 trainers.
-  //   tier 1 : solid mid-BST mons (Rounds 1-2)
-  //   tier 2 : strong pseudo-legendary / meta (Rounds 3-5)
-  //   tier 3 : end-game heavy hitters (Round 6, 8-10, etc.)
-  const POOL_TIER = {
-    1: [
-      "vileplume","wigglytuff","ninetales","rapidash","weezing","muk","hypno",
-      "alakazam","machamp","arcanine","kadabra","rhydon","dodrio","tangela",
-      "kingler","kingdra","tauros","sandslash","primeape","golduck","fearow",
-    ],
-    2: [
-      "gengar","snorlax","gyarados","dragonite","tyranitar","blissey","salamence",
-      "metagross","garchomp","milotic","togekiss","heracross","breloom","mamoswine",
-      "scizor","aggron","weavile","starmie","venusaur","charizard","blastoise",
-    ],
-    3: [
-      "dragonite","tyranitar","salamence","metagross","garchomp","hydreigon",
-      "goodra","dragapult","kommoKommo","volcarona","excadrill","ferrothorn",
-      "conkeldurr","chandelure","haxorus","milotic","mamoswine","kingambit",
-    ],
+  // Pokémon pool built dynamically from the full dictionary. Filter by BST
+  // total so difficulty scales with round, and optionally include
+  // unobtainable / legendary mons at very high rounds (post-Gold multipliers).
+  //   tier 1 : BST 400-499  (Rounds 1-2)    no unobtainable
+  //   tier 2 : BST 500-579  (Rounds 3-5)    no unobtainable
+  //   tier 3 : BST 580-649  (Round 6, 8-48) no unobtainable
+  //   tier 4 : BST 580-679  (post-Gold r50+) includes unobtainable
+  //   tier 5 : BST 650+     (high post-Gold mult) includes unobtainable
+  const TIER_BST = {
+    1: { min: 400, max: 499, unobtainable: false },
+    2: { min: 500, max: 579, unobtainable: false },
+    3: { min: 580, max: 649, unobtainable: false },
+    4: { min: 580, max: 679, unobtainable: true },
+    5: { min: 650, max: 1200, unobtainable: true },
   };
 
-  function pickFromPool(tier) {
-    const list = POOL_TIER[tier] || POOL_TIER[1];
-    for (let tries = 0; tries < 20; tries++) {
-      const id = list[Math.floor(Math.random() * list.length)];
-      if (typeof pkmn !== "undefined" && pkmn[id]) return id;
-    }
-    // Hard fallback: any common mon that definitely exists
-    return "tauros";
+  function bstTotal(p) {
+    if (!p || !p.bst) return 0;
+    return (p.bst.hp || 0) + (p.bst.atk || 0) + (p.bst.def || 0)
+         + (p.bst.satk || 0) + (p.bst.sdef || 0) + (p.bst.spe || 0);
   }
 
-  // Pick 4 move ids for a given Pokémon id. Prioritises:
-  //   slot 1 : the mon's signature (always a strong fit)
-  //   slot 2 : highest-power STAB attack compatible with its primary type
-  //   slot 3 : utility move (status / debuff / buff)
-  //   slot 4 : second attack (different type, for coverage)
+  // Cached per-tier pool (rebuilt lazily once pkmn dict is loaded).
+  const _poolCache = {};
+  function getPool(tier) {
+    if (_poolCache[tier]) return _poolCache[tier];
+    if (typeof pkmn === "undefined") return ["tauros"];
+    const cfg = TIER_BST[tier] || TIER_BST[1];
+    const ids = [];
+    for (const id of Object.keys(pkmn)) {
+      const p = pkmn[id];
+      if (!p || !p.bst) continue;
+      const total = bstTotal(p);
+      if (total < cfg.min || total > cfg.max) continue;
+      if (!cfg.unobtainable && p.tagObtainedIn === "unobtainable") continue;
+      // Skip form variants we don't want to pick randomly (megas, gmax that
+      // require specific items)
+      if (/Mega|Gmax|Primal/.test(id)) continue;
+      ids.push(id);
+    }
+    _poolCache[tier] = ids.length ? ids : ["tauros"];
+    return _poolCache[tier];
+  }
+
+  function pickFromPool(tier) {
+    const list = getPool(tier);
+    return list[Math.floor(Math.random() * list.length)] || "tauros";
+  }
+
+  // Build a strategic 4-move set for a Pokémon. Goals:
+  //   • Always 1 strong STAB attack for primary type (ex: Venusaur gets
+  //     Giga Drain / Sludge Bomb, never tackle).
+  //   • If dual-type: 1 STAB attack for secondary type; else 1 coverage.
+  //   • 1 utility move (buff, status, heal, weather — whatever fits).
+  //   • Signature move used if power ≥ 65 AND hasn't already been covered.
+  //
+  // GENETICS + ITEM RULE: in the game, B-division Pokémon (and below) can
+  // learn ANY move via genetics + a specific item. NPC trainers exploit
+  // this — if a B-or-lower mon appears on an enemy team, we bypass the
+  // natural learnable-pool filter and can pick moves of any type, making
+  // weaker mons potentially monstrous. A-division and S-division Pokémon
+  // still stick to their natural pool.
   function pickMovesetFor(pkmnId) {
     const p = typeof pkmn !== "undefined" ? pkmn[pkmnId] : null;
     if (!p || typeof move === "undefined") return [];
-    const primaryType = Array.isArray(p.type) ? p.type[0] : p.type;
-    const secondaryType = Array.isArray(p.type) ? p.type[1] : null;
+    const types = Array.isArray(p.type) ? p.type : [p.type];
+    const primaryType = types[0];
+    const secondaryType = types[1];
+
+    // Check division (S / A / B / C / D). B and below unlock universal
+    // move access via the game's genetics+item mechanic.
+    let division = "C";
+    try {
+      if (typeof returnPkmnDivision === "function") division = returnPkmnDivision(p);
+    } catch (e) { /* keep default */ }
+    const unrestrictedLearning = (division === "B" || division === "C" || division === "D");
+
+    // Natural learnable filter (only applied if division A/S):
+    const isLearnableNatural = (mv) => {
+      if (!mv || !Array.isArray(mv.moveset)) return false;
+      if (mv.moveset.indexOf("all") !== -1) return true;
+      if (mv.moveset.indexOf("normal") !== -1) return true;
+      for (const t of types) {
+        if (t && mv.moveset.indexOf(t) !== -1) return true;
+      }
+      return false;
+    };
+    const isLearnable = (mv) => {
+      if (!mv || !Array.isArray(mv.moveset)) return false;
+      if (unrestrictedLearning) return true; // B or lower → any move
+      return isLearnableNatural(mv);
+    };
 
     const chosen = [];
-    const pushIfOk = (mv) => {
-      if (!mv) return;
-      const id = mv.id || (mv === mv ? null : null);
-      // Match the rest of the codebase: we need move.id not the object
-      // (move entries have no explicit `id` property; the object key serves
-      // as identity, so derive it by comparing against move dict).
-      const key = Object.keys(move).find((k) => move[k] === mv);
-      if (!key) return;
-      if (chosen.indexOf(key) !== -1) return;
+    const keyOf = (mv) => Object.keys(move).find((k) => move[k] === mv);
+    const push = (mvOrId) => {
+      if (!mvOrId) return;
+      const key = typeof mvOrId === "string" ? mvOrId : keyOf(mvOrId);
+      if (!key || chosen.indexOf(key) !== -1 || chosen.length >= 4) return;
+      if (move[key] && move[key].restricted) return; // skip restricted (1-per-team rule)
       chosen.push(key);
     };
 
-    // 1. Signature move if defined
-    if (p.signature) pushIfOk(p.signature);
-
-    // Build candidate lists once
-    const allMoves = Object.entries(move);
-    const typeOk = (mv, t) => {
-      if (!mv || !Array.isArray(mv.moveset)) return false;
-      return mv.moveset.indexOf(t) !== -1 || mv.moveset.indexOf("all") !== -1;
-    };
-    const isAttack = (mv) => mv.power && mv.power > 0;
-    const isStatus = (mv) => !mv.power || mv.power === 0;
-
-    // 2. Strongest STAB attack for primary type (power 70-130 range, rarity >= 2)
-    const stabPrimary = allMoves
-      .filter(([k, mv]) => mv.type === primaryType && typeOk(mv, primaryType) && isAttack(mv) && mv.power >= 65 && mv.power <= 150 && (mv.rarity || 0) >= 2)
-      .sort(([, a], [, b]) => (b.power || 0) - (a.power || 0));
-    if (stabPrimary[0]) pushIfOk(stabPrimary[0][1]);
-
-    // 3. Utility move (status, low power, rarity >= 2, primary or "all" moveset)
-    const utility = allMoves
-      .filter(([k, mv]) => typeOk(mv, primaryType) && isStatus(mv) && (mv.rarity || 0) >= 2);
-    if (utility.length) {
-      const u = utility[Math.floor(Math.random() * utility.length)];
-      pushIfOk(u[1]);
+    // Pre-filter & classify the Pokémon's learnable pool
+    const pool = [];
+    for (const [k, mv] of Object.entries(move)) {
+      if (!isLearnable(mv)) continue;
+      pool.push({ id: k, mv });
     }
 
-    // 4. Coverage attack — different type from primary, strong
-    const coverageType = secondaryType || "normal";
-    const coverage = allMoves
-      .filter(([k, mv]) => mv.type === coverageType && typeOk(mv, coverageType) && isAttack(mv) && mv.power >= 60 && mv.power <= 130 && (mv.rarity || 0) >= 2)
-      .sort(([, a], [, b]) => (b.power || 0) - (a.power || 0));
-    if (coverage[0]) pushIfOk(coverage[0][1]);
+    const stabPrimary = pool
+      .filter((c) => c.mv.type === primaryType && c.mv.power && c.mv.power >= 50)
+      .sort((a, b) => (b.mv.power || 0) - (a.mv.power || 0));
+    const stabSecondary = secondaryType
+      ? pool.filter((c) => c.mv.type === secondaryType && c.mv.power && c.mv.power >= 50)
+            .sort((a, b) => (b.mv.power || 0) - (a.mv.power || 0))
+      : [];
+    const coverageAttacks = pool
+      .filter((c) => c.mv.power && c.mv.power >= 60
+                   && c.mv.type !== primaryType
+                   && c.mv.type !== secondaryType
+                   && c.mv.type !== "normal")
+      .sort((a, b) => (b.mv.power || 0) - (a.mv.power || 0));
+    const utilityMoves = pool
+      .filter((c) => (!c.mv.power || c.mv.power === 0) && (c.mv.rarity || 0) >= 2);
 
-    // Pad with tackle if we somehow came short
-    while (chosen.length < 4) {
-      if (move.tackle && chosen.indexOf("tackle") === -1) chosen.push("tackle");
-      else break;
+    // 1. Best STAB primary — always include if available
+    if (stabPrimary[0]) push(stabPrimary[0].id);
+
+    // 2. STAB secondary if dual-type, otherwise best coverage
+    if (secondaryType && stabSecondary[0]) push(stabSecondary[0].id);
+    else if (coverageAttacks[0]) push(coverageAttacks[0].id);
+
+    // 3. Signature move if strong enough and not already picked
+    if (p.signature && p.signature.power >= 65) push(p.signature);
+
+    // 4. Utility move (random pick for variety across trainers)
+    if (utilityMoves.length) {
+      const u = utilityMoves[Math.floor(Math.random() * utilityMoves.length)];
+      push(u.id);
     }
+
+    // 5. Coverage attack if not yet added
+    if (coverageAttacks[0]) push(coverageAttacks[0].id);
+    if (coverageAttacks[1]) push(coverageAttacks[1].id);
+
+    // 6. Second STAB primary (if still room)
+    if (stabPrimary[1]) push(stabPrimary[1].id);
+
+    // 7. Last-ditch fills: any remaining attack from the pool
+    const allAttacks = pool
+      .filter((c) => c.mv.power && c.mv.power > 0)
+      .sort((a, b) => (b.mv.power || 0) - (a.mv.power || 0));
+    for (const c of allAttacks) {
+      if (chosen.length >= 4) break;
+      push(c.id);
+    }
+
+    // 8. Absolute fallback (very unlikely to trigger)
+    while (chosen.length < 4 && move.tackle) {
+      if (chosen.indexOf("tackle") !== -1) break;
+      chosen.push("tackle");
+    }
+
     return chosen.slice(0, 4);
   }
 
@@ -449,10 +543,18 @@
     const lang = window.gameLang === "fr" ? "fr" : "en";
     const { sprite, name } = pickSpriteAndName(lang);
 
-    // Round-based tier scaling
+    // Round + multiplier based tier scaling.
+    //   r 1-2              → tier 1 (BST 400-499)
+    //   r 3-5              → tier 2 (BST 500-579)
+    //   r 6-48             → tier 3 (BST 580-649)
+    //   r 50+ (post-Gold)  → tier 4 (580-679, incl. unobtainable)
+    //   r 50+ mult ≥ 3     → tier 5 (BST 650+, incl. legendaries)
+    const mult = difficultyMultiplier(round);
     let tier = 1;
     if (round >= 3) tier = 2;
     if (round >= 6) tier = 3;
+    if (round > GOLD_ROUND) tier = 4;
+    if (mult >= 3) tier = 5;
 
     const slots = [1, 2, 3].map(() => {
       const id = pickFromPool(tier);
@@ -469,6 +571,7 @@
       team: slots,
       tier,
       round,
+      multiplier: mult,
       facilityId: facility.id,
     };
   }
@@ -1367,13 +1470,15 @@
     }
 
     const nextRound = run.round + 1;
-    const isSilverBoss = nextRound === SILVER_ROUND;
-    const isGoldBoss = nextRound === GOLD_ROUND;
+    const bossInfo = getBossRoundInfo(nextRound);
 
     // Regenerate (or keep) the upcoming trainer for this round
     let trainer;
-    if (isSilverBoss || isGoldBoss) {
-      const brainTeam = isSilverBoss ? facility.brain.teamSilver : facility.brain.teamGold;
+    if (bossInfo) {
+      // Post-Gold rematches use the Gold team; Silver uses the Silver team.
+      const brainTeam = bossInfo.kind === "silver"
+        ? facility.brain.teamSilver
+        : facility.brain.teamGold;
       trainer = {
         name: window.gameLang === "fr" ? facility.brain.nameFr : facility.brain.nameEn,
         sprite: facility.brain.sprite,
@@ -1384,10 +1489,12 @@
               nature: simulateNatureFor(id),
             }))
           : [1, 2, 3].map(() => {
-              const id = pickFromPool(3);
+              const id = pickFromPool(5);
               return { id, moves: pickMovesetFor(id), nature: simulateNatureFor(id) };
             }),
         tier: 3,
+        multiplier: bossInfo.multiplier,
+        bossKind: bossInfo.kind,
         isBoss: true,
       };
     } else {
