@@ -6659,6 +6659,17 @@
       const teamMenu = document.getElementById("team-menu");
       const menuBtn = document.getElementById("menu-button-parent");
       const exploreMenu = document.getElementById("explore-menu");
+      // Vanilla team-preview header has TWO buttons: "Save and Go!"
+      // (preview-team-exit) and "Go back" (pkmn-team-return). The
+      // latter is an escape hatch that bypasses combat without
+      // triggering our defeat / abandon flow — letting a frontier
+      // player skip unfavourable matchups or dodge battles. Hide it
+      // here; restored by explore.js menu handler on legit menu
+      // switches. The runtime wrapper on exitPkmnTeam below also
+      // no-ops the handler in case the button is revealed via
+      // devtools.
+      const teamReturn = document.getElementById("pkmn-team-return");
+      if (teamReturn) teamReturn.style.display = "none";
       if (previewExit) previewExit.style.display = "flex";
       if (teamMenu) {
         teamMenu.style.zIndex = "50";
@@ -6978,6 +6989,36 @@
   // Wrap leaveCombat so we can detect which side won when it returns from
   // a frontier-ext run area. Installed once at bootstrap, retries until the
   // game's leaveCombat is defined.
+  // Block the vanilla "Go back" (#pkmn-team-return) button from
+  // closing the team-preview menu while a frontier run is staged for
+  // combat. Without this, the player can back out of the pre-combat
+  // team-preview screen, skip the fight entirely, and come back later
+  // — getting a fresh trainer re-roll with no cost. We already hide
+  // the button visually in launchCombat, but this wrap is the
+  // defence-in-depth that also no-ops the handler itself.
+  function installExitPkmnTeamBlock() {
+    if (typeof window.exitPkmnTeam !== "function") {
+      setTimeout(installExitPkmnTeamBlock, 200);
+      return;
+    }
+    if (window.__frontierExtExitPkmnTeamHooked) return;
+    window.__frontierExtExitPkmnTeamHooked = true;
+    const orig = window.exitPkmnTeam;
+    window.exitPkmnTeam = function () {
+      try {
+        const inRun = typeof saved !== "undefined" && saved &&
+                      saved.frontierExt && saved.frontierExt.activeRun;
+        const stagedForRunCombat = inRun && saved.currentAreaBuffer === RUN_AREA_ID;
+        if (stagedForRunCombat) {
+          // Silent no-op — the player must either Save & Go (launch)
+          // or abandon the run from the facility panel.
+          return;
+        }
+      } catch (e) { /* ignore */ }
+      return orig.apply(this, arguments);
+    };
+  }
+
   function installCombatHook() {
     if (typeof window.leaveCombat !== "function") {
       setTimeout(installCombatHook, 200);
@@ -7089,6 +7130,7 @@
     installInjection();
     installHelpTooltip();
     installCombatHook();
+    installExitPkmnTeamBlock();
     installExitRedirect();
     installVSLeakFilter();
     installPalaceMoveHook();
