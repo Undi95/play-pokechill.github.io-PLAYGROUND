@@ -443,6 +443,41 @@
   // resetActiveRun() below instead.
   function resetPoolCache() {}
 
+  // Diagnostic helper: counts how many entries pass each filter stage +
+  // returns a few examples. Run in DevTools when the pool looks wrong
+  // (__frontierExt.debugPool(1) etc.).
+  function debugPool(tier) {
+    const cfg = TIER_BST[tier] || TIER_BST[1];
+    const out = { tier, cfg, total: 0, hasBst: 0, inRange: 0,
+                  notUnobtainable: 0, notSpecialForm: 0,
+                  sample: [], rejected: {} };
+    if (typeof pkmn === "undefined") { out.error = "pkmn is undefined"; return out; }
+    for (const id of Object.keys(pkmn)) {
+      out.total++;
+      const p = pkmn[id];
+      if (!p) { out.rejected.noEntry = (out.rejected.noEntry || 0) + 1; continue; }
+      if (!p.bst) { out.rejected.noBst = (out.rejected.noBst || 0) + 1; continue; }
+      out.hasBst++;
+      const tot = bstTotal(p);
+      if (tot < cfg.min) { out.rejected.tooLow = (out.rejected.tooLow || 0) + 1; continue; }
+      if (tot > cfg.max) { out.rejected.tooHigh = (out.rejected.tooHigh || 0) + 1; continue; }
+      out.inRange++;
+      if (!cfg.unobtainable && p.tagObtainedIn === "unobtainable") {
+        out.rejected.unobtainable = (out.rejected.unobtainable || 0) + 1; continue;
+      }
+      out.notUnobtainable++;
+      if (/Mega|Gmax|Primal/.test(id)) {
+        out.rejected.specialForm = (out.rejected.specialForm || 0) + 1; continue;
+      }
+      out.notSpecialForm++;
+      if (out.sample.length < 8) {
+        out.sample.push({ id, bst: tot, tag: p.tagObtainedIn || "(none)" });
+      }
+    }
+    out.finalPoolSize = out.notSpecialForm;
+    return out;
+  }
+
   // Debug helper: wipe the active run (including the cached bracket
   // trainers) so the next click re-generates everything from scratch with
   // the current code. Useful after fixing a trainer-gen bug while a run
@@ -1905,6 +1940,7 @@
     resetActiveRun,
     bstTotal,
     TIER_BST,
+    debugPool,
     // quick helper to reset all runs/symbols for testing
     resetAll: () => {
       if (typeof saved === "object" && saved) saved.frontierExt = null;
