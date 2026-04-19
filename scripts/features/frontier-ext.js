@@ -1214,6 +1214,13 @@
   // Mirror hook for the enemy side (exploreCombatWild). NPC trainers don't
   // have a real nature — we simulate one per slot at trainer-generation time
   // and read it back from areas[RUN_AREA_ID].frontierExtNatures[currentTrainerSlot].
+  //
+  // IMPORTANT: `exploreCombatWildTurn` is declared `let` at top of explore.js
+  // (line 3525), same for `currentTrainerSlot` (line 182). These are in the
+  // script scope, not on `window` — we MUST use bare-identifier access
+  // (via eval) to read AND write them, otherwise `window.X` gives undefined
+  // and a bare assignment in strict-mode throws. Same pattern as the
+  // fusePkmn fix in i18n/engine.js.
   function installPalaceEnemyHook() {
     if (typeof window.exploreCombatWild !== "function") {
       setTimeout(installPalaceEnemyHook, 200);
@@ -1222,25 +1229,38 @@
     if (window.__palaceEnemyHookInstalled) return;
     window.__palaceEnemyHookInstalled = true;
     const orig = window.exploreCombatWild;
+
+    // Indirect eval — runs in global scope so it can read/write script-
+    // scope `let` bindings from any classic <script>.
+    const globalEval = eval;
+    const readWildTurn = () => {
+      try { return globalEval("typeof exploreCombatWildTurn === 'undefined' ? null : exploreCombatWildTurn"); }
+      catch (e) { return null; }
+    };
+    const writeWildTurn = (n) => {
+      try { globalEval("exploreCombatWildTurn = " + JSON.stringify(n)); }
+      catch (e) { /* ignore */ }
+    };
+    const readTrainerSlot = () => {
+      try { return globalEval("typeof currentTrainerSlot === 'undefined' ? 1 : currentTrainerSlot"); }
+      catch (e) { return 1; }
+    };
+
     window.exploreCombatWild = function () {
-      let prevTurn = null;
-      if (isInPalaceRun() && typeof exploreCombatWildTurn !== "undefined") {
-        prevTurn = window.exploreCombatWildTurn;
-      }
+      const palaceActive = isInPalaceRun();
+      const prevTurn = palaceActive ? readWildTurn() : null;
       const res = orig.apply(this, arguments);
-      if (isInPalaceRun() && typeof exploreCombatWildTurn !== "undefined") {
-        const newTurn = window.exploreCombatWildTurn;
+      if (palaceActive) {
+        const newTurn = readWildTurn();
         if (newTurn !== prevTurn && newTurn !== null && newTurn !== undefined) {
-          // Which of the trainer's 3 Pokémon is active? Game tracks this
-          // via the `currentTrainerSlot` global (see explore.js:485+).
-          const slotIdx = typeof currentTrainerSlot !== "undefined" ? currentTrainerSlot : 1;
+          const slotIdx = readTrainerSlot();
           const area = areas[RUN_AREA_ID];
           if (!area) return res;
           const nature = (area.frontierExtNatures && area.frontierExtNatures[slotIdx]) || "";
           const moves = area.team["slot" + slotIdx + "Moves"] || [];
           const picked = pickSlotByNatureGeneric(moves, nature);
           if (picked !== null && picked >= 1 && picked <= 4) {
-            window.exploreCombatWildTurn = picked;
+            writeWildTurn(picked);
           }
         }
       }
