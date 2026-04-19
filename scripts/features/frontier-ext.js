@@ -3111,6 +3111,18 @@
     const run = saved.frontierExt.activeRun;
 
     if (action === "start") {
+      // Hard gate — every non-Factory facility needs exactly 3 Pokémon
+      // in the current preview team BEFORE any run state is created.
+      // Without this check, the run gets locked in, the player enters
+      // a facility-specific preview screen (dome bracket / pike rooms /
+      // pyramid map / simulated fight), then the inner "launch" path
+      // would finally block with showTeamSizeError — forcing them to
+      // abandon to get out. Fail fast here instead.
+      // Factory is exempt (rentals replace the player's team).
+      if (!isFactoryFacility(facility) && currentPreviewTeamSize() !== 3) {
+        showTeamSizeError(facility);
+        return;
+      }
       saved.frontierExt.activeRun = {
         facilityId: facility.id,
         round: 0,
@@ -3152,6 +3164,13 @@
       return;
     }
     if (action === "continue") {
+      // Same hard gate as "start" — the player may have edited the team
+      // while browsing the facility preview. Fail fast before we route
+      // back into a sub-flow that would only block at the inner launch.
+      if (!isFactoryFacility(facility) && currentPreviewTeamSize() !== 3) {
+        showTeamSizeError(facility);
+        return;
+      }
       // Consume the between-rounds unlock flag so the team re-locks as
       // soon as the player commits to the next round preview.
       if (run) run.roundJustCleared = false;
