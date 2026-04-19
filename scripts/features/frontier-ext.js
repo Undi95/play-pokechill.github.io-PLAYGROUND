@@ -258,23 +258,21 @@
     const trainers = [];
     for (let i = 1; i <= DOME_BRACKET_SIZE; i++) {
       if (i === DOME_BRACKET_SIZE && bossInfo) {
-        // Final slot = Brain fight on boss rounds
+        // Final slot = Brain fight on boss rounds. Brain brings his
+        // canonical 3-mon team; active-pick happens at launch time.
         const brainTeam = bossInfo.kind === "silver"
           ? facility.brain.teamSilver
           : facility.brain.teamGold;
-        // Clamp the brain team to the Dome's 2-Pokémon rule
-        const size = expectedTeamSize(facility);
-        const teamIds = brainTeam ? brainTeam.slice(0, size) : null;
         trainers.push({
           name: lang === "fr" ? facility.brain.nameFr : facility.brain.nameEn,
           sprite: facility.brain.sprite,
-          team: teamIds
-            ? teamIds.map((id) => ({
+          team: brainTeam
+            ? brainTeam.slice(0, 3).map((id) => ({
                 id,
                 moves: pickMovesetFor(id),
                 nature: simulateNatureFor(id),
               }))
-            : Array.from({ length: size }, () => {
+            : [1, 2, 3].map(() => {
                 const id = pickFromPool(5);
                 return { id, moves: pickMovesetFor(id), nature: simulateNatureFor(id) };
               }),
@@ -684,8 +682,9 @@
     if (round > GOLD_ROUND) tier = 4;
     if (mult >= 3) tier = 5;
 
-    // Team size scales with facility — Dome uses 2-Pokémon rosters.
-    const size = expectedTeamSize(facility);
+    // Every facility's NPC brings 3 Pokémon. Dôme picks 2 to actually
+    // fight at match-time (see openDomePokemonSelection).
+    const size = 3;
     const slots = [];
     for (let i = 0; i < size; i++) {
       const id = pickFromPool(tier);
@@ -886,6 +885,60 @@
       .frontier-ext-action-btn.danger {
         background: #c0392b;
         color: white;
+      }
+      /* Dôme 2-of-3 pick modal */
+      .frontier-ext-dome-teams {
+        display: flex;
+        gap: 1rem;
+        padding: 0.6rem;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .frontier-ext-dome-side {
+        flex: 1 1 220px;
+        min-width: 200px;
+      }
+      .frontier-ext-dome-label {
+        font-weight: bold;
+        font-size: 0.9rem;
+        color: #ffc857;
+        text-align: center;
+        margin-bottom: 0.3rem;
+      }
+      .frontier-ext-dome-slots {
+        display: flex;
+        gap: 0.4rem;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .frontier-ext-dome-card {
+        background: rgba(0,0,0,0.25);
+        border: 2px solid transparent;
+        border-radius: 0.4rem;
+        padding: 0.3rem;
+        width: 5rem;
+        text-align: center;
+        font-size: 0.75rem;
+        cursor: pointer;
+        transition: transform 0.1s, border-color 0.15s;
+        user-select: none;
+      }
+      .frontier-ext-dome-card img {
+        width: 3.5rem;
+        height: 3.5rem;
+        image-rendering: pixelated;
+      }
+      .frontier-ext-dome-card.player:hover {
+        transform: translateY(-2px);
+        border-color: rgba(255,255,255,0.5);
+      }
+      .frontier-ext-dome-card.player.selected {
+        border-color: #6ab04c;
+        background: rgba(106,176,76,0.2);
+      }
+      .frontier-ext-dome-card.opponent {
+        cursor: default;
+        border-color: rgba(192,57,43,0.5);
       }
     `;
     const style = document.createElement("style");
@@ -1106,6 +1159,160 @@
     }
 
     if (typeof openTooltip === "function") openTooltip();
+  }
+
+  // Dôme pick-2-of-3 modal — opens AFTER the bracket preview when the
+  // player clicks "Lancer le combat". Shows the player's 3 mons as
+  // togglable cards; exactly 2 must be selected. The chosen 2 become the
+  // active battlers; the third is temporarily cleared from the preview
+  // team before combat and restored in the leaveCombat hook.
+  function openDomePokemonSelection(facility) {
+    ensureSaveSlot();
+    const run = saved.frontierExt.activeRun;
+    if (!run) return;
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+
+    const bracket = ensureBracketForDome(facility);
+    const currentIdx = (run.bracketBattle || 1) - 1;
+    const opponent = bracket[currentIdx];
+    if (!opponent) return;
+
+    const pt = (saved.previewTeams && saved.previewTeams[saved.currentPreviewTeam]) || {};
+    const playerMons = [];
+    for (const sl of ["slot1", "slot2", "slot3"]) {
+      if (pt[sl] && pt[sl].pkmn) playerMons.push({ slot: sl, id: pt[sl].pkmn });
+    }
+
+    // Selection persisted on the run so re-opening keeps picks
+    if (!run.domeSelection) run.domeSelection = [];
+
+    const t = lang === "fr"
+      ? {
+          title: "Choisis 2 Pokémon",
+          desc: "Les deux camps voient leurs équipes. Sélectionne 2 Pokémon pour ce match.",
+          yourTeam: "Ton équipe",
+          opponentTeam: "Équipe adverse",
+          need2: "Sélectionne exactement 2 Pokémon.",
+          confirm: "⚔️ Confirmer et combattre",
+          back: "Retour",
+        }
+      : {
+          title: "Pick 2 Pokémon",
+          desc: "Both sides see each other's teams. Pick 2 Pokémon for this match.",
+          yourTeam: "Your team",
+          opponentTeam: "Opponent",
+          need2: "Select exactly 2 Pokémon.",
+          confirm: "⚔️ Confirm & fight",
+          back: "Back",
+        };
+
+    const top = document.getElementById("tooltipTop");
+    const title = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+
+    if (top) { top.style.display = "none"; }
+    if (title) { title.style.display = "block"; title.innerHTML = t.title; }
+    if (mid) {
+      mid.style.display = "block";
+      mid.innerHTML = `
+        <div style="padding:0.5rem 0.8rem;font-style:italic;opacity:0.85;">${t.desc}</div>
+        <div class="frontier-ext-dome-teams">
+          <div class="frontier-ext-dome-side">
+            <div class="frontier-ext-dome-label">${t.yourTeam}</div>
+            <div class="frontier-ext-dome-slots" id="frontier-ext-dome-player"></div>
+          </div>
+          <div class="frontier-ext-dome-side">
+            <div class="frontier-ext-dome-label">${t.opponentTeam} — ${opponent.name}</div>
+            <div class="frontier-ext-dome-slots">
+              ${opponent.team.map((s) =>
+                `<div class="frontier-ext-dome-card opponent"><img src="img/pkmn/sprite/${s.id}.png" alt="${s.id}"><div>${typeof format === "function" ? format(s.id) : s.id}</div></div>`
+              ).join("")}
+            </div>
+          </div>
+        </div>
+      `;
+      const playerCtr = document.getElementById("frontier-ext-dome-player");
+      if (playerCtr) {
+        playerCtr.innerHTML = playerMons.map((m) => {
+          const selected = run.domeSelection.indexOf(m.slot) !== -1;
+          return `<div class="frontier-ext-dome-card player${selected ? " selected" : ""}" data-slot="${m.slot}"><img src="img/pkmn/sprite/${m.id}.png" alt="${m.id}"><div>${typeof format === "function" ? format(m.id) : m.id}</div></div>`;
+        }).join("");
+        playerCtr.querySelectorAll("[data-slot]").forEach((el) => {
+          el.onclick = () => toggleDomeSelection(el.dataset.slot, facility);
+        });
+      }
+    }
+    if (bottom) {
+      bottom.style.display = "block";
+      const canConfirm = run.domeSelection.length === DOME_ACTIVE_SIZE;
+      bottom.innerHTML = `
+        <div style="padding:0.4rem 0.8rem;font-size:0.85rem;color:${canConfirm ? "#2a5e2a" : "#7a2e1a"};text-align:center;">
+          ${canConfirm ? `✓ ${run.domeSelection.length}/${DOME_ACTIVE_SIZE}` : t.need2}
+        </div>
+        <div class="frontier-ext-run-actions">
+          <button class="frontier-ext-action-btn primary" data-action="confirm-dome" ${canConfirm ? "" : "disabled style=\"opacity:0.4;cursor:not-allowed;\""}>${t.confirm}</button>
+          <button class="frontier-ext-action-btn" data-action="back">${t.back}</button>
+        </div>
+      `;
+      bottom.querySelectorAll("[data-action]").forEach((btn) => {
+        btn.onclick = () => handleRunAction(btn.dataset.action, facility);
+      });
+    }
+    if (typeof openTooltip === "function") openTooltip();
+  }
+
+  function toggleDomeSelection(slot, facility) {
+    const run = saved.frontierExt.activeRun;
+    if (!run) return;
+    if (!run.domeSelection) run.domeSelection = [];
+    const idx = run.domeSelection.indexOf(slot);
+    if (idx !== -1) {
+      run.domeSelection.splice(idx, 1);
+    } else if (run.domeSelection.length < DOME_ACTIVE_SIZE) {
+      run.domeSelection.push(slot);
+    } else {
+      // Replace oldest selection when trying to select a third
+      run.domeSelection.shift();
+      run.domeSelection.push(slot);
+    }
+    openDomePokemonSelection(facility); // re-render
+  }
+
+  // Snapshot + clear the unselected slot(s) of the preview team so the
+  // combat engine only sees the 2 chosen mons. Store the snapshot on the
+  // run so we can restore everything in the leaveCombat hook.
+  function applyDomeSelection() {
+    const run = saved.frontierExt.activeRun;
+    if (!run || !Array.isArray(run.domeSelection)) return;
+    const pt = saved.previewTeams[saved.currentPreviewTeam];
+    if (!pt) return;
+    const backup = {};
+    for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
+      backup[sl] = pt[sl];
+    }
+    run.domeTeamBackup = backup;
+    run.domeTeamSlot = saved.currentPreviewTeam;
+    // Rewrite slots: selected mons into slot1/slot2, others cleared.
+    const selectedSlots = run.domeSelection.slice(0, DOME_ACTIVE_SIZE);
+    const newSlots = { slot1: null, slot2: null, slot3: null, slot4: null, slot5: null, slot6: null };
+    selectedSlots.forEach((srcSlot, i) => {
+      newSlots["slot" + (i + 1)] = pt[srcSlot];
+    });
+    Object.assign(pt, newSlots);
+  }
+
+  function restoreDomeSelection() {
+    const run = saved.frontierExt.activeRun;
+    if (!run || !run.domeTeamBackup) return;
+    const pt = saved.previewTeams[run.domeTeamSlot];
+    if (pt) {
+      for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
+        pt[sl] = run.domeTeamBackup[sl];
+      }
+    }
+    run.domeTeamBackup = null;
+    run.domeTeamSlot = null;
   }
 
   // Dome-specific preview: shows the 3-trainer bracket before launching
@@ -1344,6 +1551,20 @@
       return;
     }
     if (action === "launch") {
+      // For Dôme, "Lancer" opens the 2-of-3 pick screen first; confirm
+      // then calls launchCombat.
+      if (isDomeFacility(facility)) {
+        openDomePokemonSelection(facility);
+        return;
+      }
+      launchCombat(facility);
+      return;
+    }
+    if (action === "confirm-dome") {
+      // Validated 2-of-3 selection — apply it + actually launch.
+      const r = saved.frontierExt.activeRun;
+      if (!r || !Array.isArray(r.domeSelection) || r.domeSelection.length !== DOME_ACTIVE_SIZE) return;
+      applyDomeSelection();
       launchCombat(facility);
       return;
     }
@@ -1628,11 +1849,23 @@
   function buildEphemeralRunArea(trainer, facility) {
     if (typeof areas === "undefined" || typeof pkmn === "undefined") return null;
 
+    // Dôme: enemy AI picks DOME_ACTIVE_SIZE random mons from their 3-team
+    // for the actual match. Keep `trainer.team` untouched (so the bracket
+    // preview can still show the full roster); just pick a subset for
+    // the area mounting.
+    let effectiveTeam = trainer.team;
+    if (isDomeFacility(facility) && trainer.team.length > DOME_ACTIVE_SIZE) {
+      const indices = [0, 1, 2]
+        .sort(() => Math.random() - 0.5)
+        .slice(0, DOME_ACTIVE_SIZE);
+      effectiveTeam = indices.map((i) => trainer.team[i]);
+    }
+
     const team = {};
     // Parallel array: simulated natures per slot so the Palace rule can look
     // up the active opponent's nature by slot index at combat time.
     const naturesBySlot = {};
-    trainer.team.forEach((slot, i) => {
+    effectiveTeam.forEach((slot, i) => {
       const slotN = i + 1;
       if (!pkmn[slot.id]) return;
       team["slot" + slotN] = pkmn[slot.id];
@@ -1679,15 +1912,18 @@
     }
   }
 
-  // Expected team size per facility. Most Hoenn facilities use 3 Pokémon
-  // (Tour / Palais / Arène / Usine / Pic / Pyramide). Only the Dôme
-  // enforces 2 — single-elim tournament battles were 2v2 in Gen 3 Emerald
-  // (the player brings 3, picks 2 per tournament, but since we don't yet
-  // have a "pick 2 of 3" UI we just require a 2-Pokémon team).
+  // Team size brought INTO the facility. Every Hoenn facility uses 3 per
+  // canonical Gen 3 rules. The Dôme still uses 3 here because the
+  // signature rule is "bring 3, pick 2 per match" (see DOME_ACTIVE_SIZE
+  // below and the player-pick modal in openDomePokemonSelection).
   function expectedTeamSize(facility) {
-    if (isDomeFacility(facility)) return 2;
     return 3;
   }
+
+  // Dôme only — how many of the 3 Pokémon actually fight in each match.
+  // Canonical Gen 3 Emerald: both sides see each other's 3-mon roster,
+  // then each side secretly picks 2 to send into battle.
+  const DOME_ACTIVE_SIZE = 2;
 
   function showTeamSizeError(facility) {
     const lang = window.gameLang === "fr" ? "fr" : "en";
@@ -1895,6 +2131,12 @@
         try {
           if (wasVictory) onRunVictory();
           else onRunDefeat();
+          // If this was a Dome match, restore the player's full 3-mon
+          // team (we only cleared slots 3+ for the 2v2 match).
+          restoreDomeSelection();
+          // Clear Dome selection so next match picks fresh.
+          const r = saved.frontierExt && saved.frontierExt.activeRun;
+          if (r) r.domeSelection = [];
           // DO NOT delete areas[RUN_AREA_ID] here — the game calls
           // exitCombat() *after* leaveCombat() (triggered by the end-of-
           // battle screen buttons), and it reads areas[saved.lastAreaJoined]
@@ -1988,7 +2230,11 @@
     isDomeFacility,
     ensureBracketForDome,
     openDomeBracketPreview,
+    openDomePokemonSelection,
+    applyDomeSelection,
+    restoreDomeSelection,
     DOME_BRACKET_SIZE,
+    DOME_ACTIVE_SIZE,
     difficultyMultiplier,
     getBossRoundInfo,
     // Pool debug
