@@ -7973,6 +7973,47 @@
     }
   }
 
+  // ─── FACTORY RESTRICTED-MOVES BYPASS ──────────────────────────────────────
+  // The enemy moveset generator intentionally ignores the vanilla "at most
+  // one restricted move per team" rule — gives boss mons Swords Dance +
+  // signature combos etc. Factory rentals inherit this, and after a post-
+  // battle swap the player can end up with 2+ restricted moves on a
+  // rental, which makes vanilla injectPreviewTeam (teams.js:335+) pop a
+  // blocking "Capacités restreintes" modal before combat starts.
+  //
+  // Fix: while a Factory run is active, wrap injectPreviewTeam so that
+  // during its synchronous run every move[].restricted flag reads false.
+  // The flag is stashed and restored in a try/finally, so nothing else
+  // (tooltip rendering, movepool learning, Dome/Pike/Pyramide validation)
+  // sees a clobbered state outside of that exact call window. Bypass
+  // ONLY fires for Factory — all other facilities keep the vanilla rule.
+  function installFactoryRestrictedBypass() {
+    if (typeof window.injectPreviewTeam !== "function") {
+      setTimeout(installFactoryRestrictedBypass, 150);
+      return;
+    }
+    if (window.__frontierExtRestrictedBypassHooked) return;
+    window.__frontierExtRestrictedBypassHooked = true;
+    const orig = window.injectPreviewTeam;
+    window.injectPreviewTeam = function () {
+      const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
+      const facility = run && FACILITIES.find((f) => f.id === run.facilityId);
+      const isFactoryRun = facility && isFactoryFacility(facility);
+      if (!isFactoryRun || typeof move === "undefined") {
+        return orig.apply(this, arguments);
+      }
+      const stash = [];
+      for (const [k, mv] of Object.entries(move)) {
+        if (mv && mv.restricted) { stash.push(k); mv.restricted = false; }
+      }
+      try {
+        return orig.apply(this, arguments);
+      } finally {
+        for (const k of stash) { if (move[k]) move[k].restricted = true; }
+      }
+    };
+  }
+
   function installInjection() {
     if (typeof window.updateFrontier !== "function" || typeof window.updateVS !== "function") {
       setTimeout(installInjection, 100);
@@ -8116,6 +8157,7 @@
     // front makes every style available the moment the DOM is ready.
     try { injectStyles(); } catch (e) { console.error("[frontier-ext] injectStyles failed:", e); }
     installInjection();
+    installFactoryRestrictedBypass();
     installHelpTooltip();
     installCombatHook();
     installExitPkmnTeamBlock();
