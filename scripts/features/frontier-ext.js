@@ -229,6 +229,68 @@
     return null;
   }
 
+  // ─── 2c. DOME BRACKET LOGIC ──────────────────────────────────────────────
+  // In the Dome, one "round" = a full 3-fight bracket (QF → SF → Final).
+  // The last slot of each bracket is the Brain when round === 7 / 49 / post-
+  // gold rematches, otherwise a standard pool trainer. Teams for all 3
+  // opponents are pre-generated when a new bracket opens so the player can
+  // preview the whole bracket before any battle starts.
+  const DOME_BRACKET_SIZE = 3;
+
+  function isDomeFacility(facility) {
+    return facility && facility.rules && facility.rules.bracketTournament;
+  }
+
+  // Build (or return cached) the 3-trainer bracket for the current round.
+  // Stored on run.bracketTrainers so the preview UI can reuse without
+  // regenerating each screen refresh. Regenerates whenever the stored
+  // round doesn't match the current one.
+  function ensureBracketForDome(facility) {
+    const run = saved.frontierExt.activeRun;
+    if (!run) return [];
+    const currentRound = run.round + 1; // round about to be attempted
+    if (run.bracketRound === currentRound && Array.isArray(run.bracketTrainers)
+        && run.bracketTrainers.length === DOME_BRACKET_SIZE) {
+      return run.bracketTrainers;
+    }
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const bossInfo = getBossRoundInfo(currentRound);
+    const trainers = [];
+    for (let i = 1; i <= DOME_BRACKET_SIZE; i++) {
+      if (i === DOME_BRACKET_SIZE && bossInfo) {
+        // Final slot = Brain fight on boss rounds
+        const brainTeam = bossInfo.kind === "silver"
+          ? facility.brain.teamSilver
+          : facility.brain.teamGold;
+        trainers.push({
+          name: lang === "fr" ? facility.brain.nameFr : facility.brain.nameEn,
+          sprite: facility.brain.sprite,
+          team: brainTeam
+            ? brainTeam.map((id) => ({
+                id,
+                moves: pickMovesetFor(id),
+                nature: simulateNatureFor(id),
+              }))
+            : [1, 2, 3].map(() => {
+                const id = pickFromPool(5);
+                return { id, moves: pickMovesetFor(id), nature: simulateNatureFor(id) };
+              }),
+          tier: 3,
+          multiplier: bossInfo.multiplier,
+          bossKind: bossInfo.kind,
+          isBoss: true,
+        });
+      } else {
+        // Regular bracket trainer — tier scales with round
+        trainers.push(generateTrainer(currentRound, facility));
+      }
+    }
+    run.bracketTrainers = trainers;
+    run.bracketRound = currentRound;
+    if (run.bracketBattle === undefined) run.bracketBattle = 1;
+    return trainers;
+  }
+
   // ─── 2b. ACCESS GATE ──────────────────────────────────────────────────────
   // All 7 secret facilities are locked until the player defeats Pokemon
   // Professor Oak in VS. Matches the Shop / VS-trainer pattern
@@ -933,7 +995,11 @@
       mid.style.display = "block";
       let html = `<div style="padding:0.4rem 0.8rem;font-style:italic;opacity:0.9;">`;
       if (isActive) {
-        html += `<strong>${t.inProgress}</strong> — ${t.round} ${run.round + 1}/${SILVER_ROUND}`;
+        const dome = isDomeFacility(facility);
+        const battleStr = dome
+          ? ` · ${lang === "fr" ? "Combat" : "Battle"} ${run.bracketBattle || 1}/${DOME_BRACKET_SIZE}`
+          : "";
+        html += `<strong>${t.inProgress}</strong> — ${t.round} ${run.round + 1}/${SILVER_ROUND}${battleStr}`;
       } else {
         html += `${lang === "fr" ? facility.descFr : facility.descEn}`;
       }
@@ -970,6 +1036,113 @@
       });
     }
 
+    if (typeof openTooltip === "function") openTooltip();
+  }
+
+  // Dome-specific preview: shows the 3-trainer bracket before launching
+  // each individual battle inside it. Highlights the current opponent.
+  function openDomeBracketPreview(facility) {
+    ensureSaveSlot();
+    const run = saved.frontierExt.activeRun;
+    if (!run || run.facilityId !== facility.id) return;
+
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const bracket = ensureBracketForDome(facility);
+    const currentIdx = (run.bracketBattle || 1) - 1;
+    const trainer = bracket[currentIdx];
+    if (!trainer) return;
+
+    const t = lang === "fr"
+      ? {
+          round: "Round",
+          bracket: "Bracket",
+          battle: "Combat",
+          vs: "vs",
+          nextOpp: "Prochain adversaire",
+          remainingInBracket: "Adversaires à venir dans ce bracket",
+          warn: "⚠️ Tous tes Pokémon doivent être niveau 100.",
+          launch: "⚔️ Lancer le combat",
+          cancel: "Annuler",
+          qf: "Quart",
+          sf: "Demi",
+          final: "Finale",
+        }
+      : {
+          round: "Round",
+          bracket: "Bracket",
+          battle: "Battle",
+          vs: "vs",
+          nextOpp: "Next opponent",
+          remainingInBracket: "Upcoming opponents in this bracket",
+          warn: "⚠️ All your Pokémon must be level 100.",
+          launch: "⚔️ Launch battle",
+          cancel: "Cancel",
+          qf: "QF",
+          sf: "SF",
+          final: "Final",
+        };
+
+    const labels = [t.qf, t.sf, t.final];
+    const top = document.getElementById("tooltipTop");
+    const title = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+
+    if (top) {
+      top.style.display = "block";
+      top.innerHTML = `<img src="img/trainers/${trainer.sprite}.png" style="max-height: 140px; image-rendering: pixelated;" alt="${trainer.name}">`;
+    }
+    if (title) {
+      title.style.display = "block";
+      title.innerHTML = `${t.round} ${run.round + 1} — ${labels[currentIdx]}: ${trainer.name}`;
+    }
+    if (mid) {
+      mid.style.display = "block";
+      const teamPreview = trainer.team
+        .map((slot) => (typeof format === "function" ? format(slot.id) : slot.id))
+        .join(" · ");
+      // Bracket overview — mark current battle, grey out completed & upcoming
+      const bracketRows = bracket.map((tr, i) => {
+        const teamStr = tr.team
+          .map((s) => (typeof format === "function" ? format(s.id) : s.id))
+          .join(" · ");
+        const status = i < currentIdx
+          ? "✓"
+          : i === currentIdx
+          ? "▶"
+          : "·";
+        const style = i === currentIdx
+          ? "color:#ffd700;font-weight:bold;"
+          : i < currentIdx
+          ? "opacity:0.45;"
+          : "opacity:0.7;";
+        const bossMark = tr.isBoss ? " 👑" : "";
+        return `<div style="${style}padding:0.15rem 0;">${status} ${labels[i]}: <strong>${tr.name}${bossMark}</strong> — ${teamStr}</div>`;
+      }).join("");
+      mid.innerHTML = `
+        <div style="padding:0.5rem 0.8rem;">
+          <div style="font-weight:bold;color:#ffd700;margin-bottom:0.3rem;">${t.nextOpp}:</div>
+          <div>${teamPreview}</div>
+        </div>
+        <div style="padding:0.4rem 0.8rem;border-top:1px dashed rgba(255,255,255,0.15);margin-top:0.3rem;">
+          <div style="font-size:0.85rem;opacity:0.8;margin-bottom:0.2rem;">${t.bracket} (${t.round} ${run.round + 1})</div>
+          ${bracketRows}
+        </div>
+      `;
+    }
+    if (bottom) {
+      bottom.style.display = "block";
+      bottom.innerHTML = `
+        <div style="padding:0.4rem 0.8rem;color:#7a2e1a;font-size:0.85rem;text-align:center;">${t.warn}</div>
+        <div class="frontier-ext-run-actions">
+          <button class="frontier-ext-action-btn primary" data-action="launch">${t.launch}</button>
+          <button class="frontier-ext-action-btn" data-action="back">${t.cancel}</button>
+        </div>
+      `;
+      bottom.querySelectorAll("[data-action]").forEach((btn) => {
+        btn.onclick = () => handleRunAction(btn.dataset.action, facility);
+      });
+    }
     if (typeof openTooltip === "function") openTooltip();
   }
 
@@ -1071,13 +1244,18 @@
         facilityId: facility.id,
         round: 0,
         upcomingTrainer: null,
+        bracketBattle: 1,
+        bracketTrainers: null,
+        bracketRound: null,
       };
       saved.frontierExt.streaks[facility.id] = 0;
-      openSimulatedFight(facility);
+      if (isDomeFacility(facility)) openDomeBracketPreview(facility);
+      else openSimulatedFight(facility);
       return;
     }
     if (action === "continue") {
-      openSimulatedFight(facility);
+      if (isDomeFacility(facility)) openDomeBracketPreview(facility);
+      else openSimulatedFight(facility);
       return;
     }
     if (action === "abandon") {
@@ -1474,7 +1652,13 @@
 
     // Regenerate (or keep) the upcoming trainer for this round
     let trainer;
-    if (bossInfo) {
+    if (isDomeFacility(facility)) {
+      // Dome: pull the pre-generated trainer from the bracket array at
+      // the current sub-position (bracketBattle 1/2/3).
+      const bracket = ensureBracketForDome(facility);
+      const idx = (run.bracketBattle || 1) - 1;
+      trainer = bracket[idx] || generateTrainer(nextRound, facility);
+    } else if (bossInfo) {
       // Post-Gold rematches use the Gold team; Silver uses the Silver team.
       const brainTeam = bossInfo.kind === "silver"
         ? facility.brain.teamSilver
@@ -1533,6 +1717,24 @@
     ensureSaveSlot();
     const run = saved.frontierExt.activeRun;
     if (!run) return;
+    const facility = FACILITIES.find((f) => f.id === run.facilityId);
+
+    // Dome: victory advances sub-battle first; round only advances when the
+    // whole 3-fight bracket is cleared. Symbol checks happen on bracket
+    // completion, not per battle.
+    if (isDomeFacility(facility)) {
+      run.bracketBattle = (run.bracketBattle || 1) + 1;
+      if (run.bracketBattle <= DOME_BRACKET_SIZE) {
+        // Still more opponents in this bracket — don't advance round yet.
+        run.upcomingTrainer = null;
+        return;
+      }
+      // Bracket cleared → advance round + reset bracket state.
+      run.bracketBattle = 1;
+      run.bracketTrainers = null;
+      run.bracketRound = null;
+    }
+
     run.round += 1;
     saved.frontierExt.streaks[run.facilityId] = run.round;
     if (run.round > (saved.frontierExt.maxStreaks[run.facilityId] || 0)) {
@@ -1541,8 +1743,6 @@
     if (run.round === SILVER_ROUND) saved.frontierExt.symbols[run.facilityId].silver = true;
     else if (run.round === GOLD_ROUND) saved.frontierExt.symbols[run.facilityId].gold = true;
     run.upcomingTrainer = null;
-    // Player returns to explore menu naturally via leaveCombat — they'll
-    // click the tile again to continue or go elsewhere.
   }
 
   function onRunDefeat() {
@@ -1670,6 +1870,13 @@
     simulateNatureFor,
     isInPalaceRun,
     NATURE_STYLE_WEIGHTS,
+    // Dome debug
+    isDomeFacility,
+    ensureBracketForDome,
+    openDomeBracketPreview,
+    DOME_BRACKET_SIZE,
+    difficultyMultiplier,
+    getBossRoundInfo,
     // quick helper to reset all runs/symbols for testing
     resetAll: () => {
       if (typeof saved === "object" && saved) saved.frontierExt = null;
