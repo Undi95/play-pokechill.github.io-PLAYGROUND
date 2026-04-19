@@ -388,23 +388,25 @@
     "Anna","Ivy",
   ];
 
-  // Pokémon pool built dynamically from the full dictionary. Filter by BST
-  // total so difficulty scales with round, and optionally include
-  // unobtainable / legendary mons at very high rounds (post-Gold multipliers).
-  // Ranges widened because early tests showed tier-1 nearly empty — turns
-  // out a lot of mid-tier mons sit around BST 350-480, not 400-499.
-  //   tier 1 : BST 300-499  (Rounds 1-2)    no unobtainable
-  //   tier 2 : BST 450-579  (Rounds 3-5)    no unobtainable
-  //   tier 3 : BST 540-649  (Round 6, 8-48) no unobtainable
-  //   tier 4 : BST 540-699  (post-Gold r50+) includes unobtainable
-  //   tier 5 : BST 600+     (high post-Gold mult) includes unobtainable
-  const TIER_BST = {
-    1: { min: 300, max: 499, unobtainable: false },
-    2: { min: 450, max: 579, unobtainable: false },
-    3: { min: 540, max: 649, unobtainable: false },
-    4: { min: 540, max: 699, unobtainable: true },
-    5: { min: 600, max: 1200, unobtainable: true },
+  // Pokémon pool built dynamically from the full dictionary. Instead of
+  // hard-coded BST ranges (fragile — depends on how the game distributes
+  // stats), we sort every mon by BST at runtime and slice by percentile.
+  // Guarantees each tier always has a sizeable pool no matter the data:
+  //   tier 1 : bottom 50% of BSTs     (Rounds 1-2)   no unobtainable
+  //   tier 2 : 30-75%                 (Rounds 3-5)   no unobtainable
+  //   tier 3 : 60-95%                 (Rounds 6-48)  no unobtainable
+  //   tier 4 : 60-100%                (post-Gold)    incl. unobtainable
+  //   tier 5 : top 15%                (mult ≥ 3)     incl. unobtainable
+  const TIER_PERCENTILE = {
+    1: { minPct: 0.00, maxPct: 0.50, unobtainable: false },
+    2: { minPct: 0.30, maxPct: 0.75, unobtainable: false },
+    3: { minPct: 0.60, maxPct: 0.95, unobtainable: false },
+    4: { minPct: 0.60, maxPct: 1.00, unobtainable: true },
+    5: { minPct: 0.85, maxPct: 1.00, unobtainable: true },
   };
+
+  // Kept for debug / compat with earlier tooling.
+  const TIER_BST = TIER_PERCENTILE;
 
   function bstTotal(p) {
     if (!p || !p.bst) return 0;
@@ -416,24 +418,38 @@
          + (b.satk || 0) + (b.sdef || 0) + (b.spe || 0);
   }
 
-  // No caching — the pkmn dictionary is iterated on every call because (a)
-  // its contents can be mutated at runtime by the game (caught flags,
-  // tagObtainedIn re-assignment on load, etc.) and (b) it's a ~600-entry
-  // pass that takes well under 1 ms. Avoids entire classes of stale-cache
-  // bugs in exchange for negligible cost.
-  function getPool(tier) {
-    if (typeof pkmn === "undefined") return ["tauros"];
-    const cfg = TIER_BST[tier] || TIER_BST[1];
-    const ids = [];
+  // Build a sorted list of all eligible {id, bst} for percentile slicing.
+  // Excludes special forms and entries without BST. Unobtainable entries
+  // are kept here — the tier config decides whether to include them at
+  // pick time. Recomputed on every getPool call (fast enough; 1408-entry
+  // scan + sort).
+  function buildSortedBstList() {
+    if (typeof pkmn === "undefined") return [];
+    const out = [];
     for (const id of Object.keys(pkmn)) {
       const p = pkmn[id];
       if (!p || !p.bst) continue;
-      const total = bstTotal(p);
-      if (total < cfg.min || total > cfg.max) continue;
-      if (!cfg.unobtainable && p.tagObtainedIn === "unobtainable") continue;
-      // Skip form variants that require a specific item to exist
       if (/Mega|Gmax|Primal/.test(id)) continue;
-      ids.push(id);
+      const total = bstTotal(p);
+      if (total <= 0) continue;
+      out.push({ id, bst: total, unobtainable: p.tagObtainedIn === "unobtainable" });
+    }
+    out.sort((a, b) => a.bst - b.bst);
+    return out;
+  }
+
+  function getPool(tier) {
+    if (typeof pkmn === "undefined") return ["tauros"];
+    const cfg = TIER_PERCENTILE[tier] || TIER_PERCENTILE[1];
+    const sorted = buildSortedBstList();
+    if (!sorted.length) return ["tauros"];
+    const lo = Math.floor(sorted.length * cfg.minPct);
+    const hi = Math.ceil(sorted.length * cfg.maxPct);
+    const slice = sorted.slice(lo, hi);
+    const ids = [];
+    for (const e of slice) {
+      if (!cfg.unobtainable && e.unobtainable) continue;
+      ids.push(e.id);
     }
     return ids.length ? ids : ["tauros"];
   }
@@ -443,39 +459,35 @@
   // resetActiveRun() below instead.
   function resetPoolCache() {}
 
-  // Diagnostic helper: counts how many entries pass each filter stage +
-  // returns a few examples. Run in DevTools when the pool looks wrong
-  // (__frontierExt.debugPool(1) etc.).
+  // Diagnostic: inspect the actual BST distribution + per-tier pool sizes.
+  // Run from DevTools: __frontierExt.debugPool() (no args = full summary)
+  // or __frontierExt.debugPool(2) for a specific tier's slice + sample.
   function debugPool(tier) {
-    const cfg = TIER_BST[tier] || TIER_BST[1];
-    const out = { tier, cfg, total: 0, hasBst: 0, inRange: 0,
-                  notUnobtainable: 0, notSpecialForm: 0,
-                  sample: [], rejected: {} };
-    if (typeof pkmn === "undefined") { out.error = "pkmn is undefined"; return out; }
-    for (const id of Object.keys(pkmn)) {
-      out.total++;
-      const p = pkmn[id];
-      if (!p) { out.rejected.noEntry = (out.rejected.noEntry || 0) + 1; continue; }
-      if (!p.bst) { out.rejected.noBst = (out.rejected.noBst || 0) + 1; continue; }
-      out.hasBst++;
-      const tot = bstTotal(p);
-      if (tot < cfg.min) { out.rejected.tooLow = (out.rejected.tooLow || 0) + 1; continue; }
-      if (tot > cfg.max) { out.rejected.tooHigh = (out.rejected.tooHigh || 0) + 1; continue; }
-      out.inRange++;
-      if (!cfg.unobtainable && p.tagObtainedIn === "unobtainable") {
-        out.rejected.unobtainable = (out.rejected.unobtainable || 0) + 1; continue;
-      }
-      out.notUnobtainable++;
-      if (/Mega|Gmax|Primal/.test(id)) {
-        out.rejected.specialForm = (out.rejected.specialForm || 0) + 1; continue;
-      }
-      out.notSpecialForm++;
-      if (out.sample.length < 8) {
-        out.sample.push({ id, bst: tot, tag: p.tagObtainedIn || "(none)" });
-      }
+    const sorted = buildSortedBstList();
+    const summary = {
+      totalEligible: sorted.length,
+      minBst: sorted[0] ? sorted[0].bst : null,
+      maxBst: sorted[sorted.length - 1] ? sorted[sorted.length - 1].bst : null,
+      unobtainableCount: sorted.filter((e) => e.unobtainable).length,
+      tiers: {},
+    };
+    for (const t of [1, 2, 3, 4, 5]) {
+      const pool = getPool(t);
+      summary.tiers[t] = {
+        size: pool.length,
+        bstRange: pool.length
+          ? [
+              Math.min(...pool.map((id) => bstTotal(pkmn[id]))),
+              Math.max(...pool.map((id) => bstTotal(pkmn[id]))),
+            ]
+          : null,
+        sample: pool.slice(0, 6),
+      };
     }
-    out.finalPoolSize = out.notSpecialForm;
-    return out;
+    if (tier !== undefined) {
+      summary.detail = summary.tiers[tier];
+    }
+    return summary;
   }
 
   // Debug helper: wipe the active run (including the cached bracket
