@@ -961,85 +961,254 @@
   //   • (future) level-dependent move quality floor
   // When omitted, the function behaves exactly like before — keeps backward
   // compatibility with callers in the bracket/Pike preview paths.
+  // ─── MOVE CATEGORY CACHE ──────────────────────────────────────────────
+  // Built once per session (move dict is immutable post-boot) by scanning
+  // `move[k].hitEffect.toString()` for the game's real effect patterns.
+  // The old pickMovesetFor used broad regexes like /atkup[12]/ that missed
+  // most setup / weather / terrain / screen moves because the actual
+  // hitEffect format is `moveBuff(target, 'atkup2', 'self')` with quotes
+  // and `changeWeather('sunny')` for weather. We key off those instead.
+  let _moveCatsCache = null;
+  function buildMoveCategories() {
+    if (_moveCatsCache) return _moveCatsCache;
+    if (typeof move === "undefined") return { cats: {}, buffKind: {} };
+    const cats = {
+      setupAtk: [],       // Swords Dance / Howl / Hone Claws (atkup1|2)
+      setupSatk: [],      // Nasty Plot / Tail Glow (satkup1|2)
+      setupSpe: [],       // Agility / Rock Polish / Autotomize (speup2)
+      setupMixOff: [],    // Dragon Dance / Shift Gear / Quiver Dance (atk+spe, satk+spe)
+      setupExtreme: [],   // Belly Drum / Shell Smash / Clangorous Soul (huge or +3)
+      setupDef: [],       // Iron Defense / Amnesia / Calm Mind / Bulk Up (def/sdef up)
+      weatherSun: [],
+      weatherRain: [],
+      weatherSand: [],
+      weatherHail: [],
+      terrainElec: [],
+      terrainGrass: [],
+      terrainMisty: [],
+      screenReflect: [],  // Reflect / Light Screen / Safeguard
+      screenLight: [],
+      roomField: [],      // Trick Room / Wonder Room / Magic Room
+      debuff: [],         // Status-inflicting or stat-down
+      healing: [],        // Recover / Roost / Morning Sun
+    };
+    const buffKind = {}; // moveKey → string category (for quick lookup)
+    const markCat = (bucket, id) => {
+      cats[bucket].push(id);
+      buffKind[id] = bucket;
+    };
+
+    for (const [k, mv] of Object.entries(move)) {
+      if (!mv || typeof mv.hitEffect !== "function") continue;
+      const src = mv.hitEffect.toString();
+      const isStatus = mv.split === "status" || !mv.power;
+
+      // Weather / terrain / screens — exclusive detection via changeWeather("X")
+      const weatherMatch = src.match(/changeWeather\(\s*['"]([a-zA-Z]+)['"]/);
+      if (weatherMatch) {
+        const w = weatherMatch[1];
+        if (w === "sunny")           markCat("weatherSun", k);
+        else if (w === "rainy")      markCat("weatherRain", k);
+        else if (w === "sandstorm")  markCat("weatherSand", k);
+        else if (w === "hail")       markCat("weatherHail", k);
+        else if (w === "electricTerrain") markCat("terrainElec", k);
+        else if (w === "grassyTerrain")   markCat("terrainGrass", k);
+        else if (w === "mistyTerrain")    markCat("terrainMisty", k);
+        else if (w === "reflect")         markCat("screenReflect", k);
+        else if (w === "lightScreen")     markCat("screenLight", k);
+        else if (/(trickRoom|weirdRoom|crossRoom|foggy|safeguard)/.test(w)) markCat("roomField", k);
+        continue;
+      }
+
+      if (!isStatus) {
+        // Attack with a secondary buff/debuff — don't categorise as pure
+        // setup/debuff (we don't want Volt Tackle in "setupAtk" just because
+        // it includes a side-effect). Only status-split moves get indexed.
+        continue;
+      }
+
+      // Count self-target stat-up instances by stat + magnitude
+      let selfAtk = 0, selfSatk = 0, selfSpe = 0, selfDef = 0, selfSdef = 0;
+      const buffRe = /moveBuff\s*\([^,]+,\s*['"]([a-zA-Z]+)(up)?(down)?([0-9])['"]\s*(?:,\s*['"]self['"]\s*)?\)/g;
+      // Simpler direct pattern — match each self-buff call
+      const selfRe = /moveBuff\s*\([^,]+,\s*['"]([a-zA-Z]+)(up|down)([0-9])['"]\s*,\s*['"]self['"]/g;
+      let m;
+      while ((m = selfRe.exec(src)) !== null) {
+        const stat = m[1], dir = m[2], mag = parseInt(m[3], 10);
+        if (dir !== "up") continue;
+        if (stat === "atk")  selfAtk  += mag;
+        if (stat === "satk") selfSatk += mag;
+        if (stat === "spe")  selfSpe  += mag;
+        if (stat === "def")  selfDef  += mag;
+        if (stat === "sdef") selfSdef += mag;
+      }
+      // Some moves omit the "self" arg (defaults to user) — legacy syntax.
+      // Detect pure self-buff moves by checking if the move has no opponent-
+      // facing damage and buffs show up at all.
+      if (selfAtk + selfSatk + selfSpe + selfDef + selfSdef === 0) {
+        // No self-buff detected — check for team-buff or debuff patterns.
+        const teamBuffRe = /moveBuff\([^,]+,\s*['"][a-zA-Z]+up[0-9]['"]\s*,\s*['"]team['"]/;
+        if (teamBuffRe.test(src)) {
+          markCat("setupDef", k); // team-wide buff = support role
+          continue;
+        }
+        const debuffRe = /moveBuff\([^,]+,\s*['"](poisoned|burn|paralysis|sleep|confused|atkdown|satkdown|defdown|sdefdown|spedown|frozen)/;
+        if (debuffRe.test(src)) { markCat("debuff", k); continue; }
+        const healRe = /heal\s*\(|hpHeal|recover|restoreHp/i;
+        if (healRe.test(src)) { markCat("healing", k); continue; }
+        continue;
+      }
+
+      const totalOff = selfAtk + selfSatk + selfSpe;
+      const totalDef = selfDef + selfSdef;
+      // Extreme-booster detection: any single-stat +3, or multi-stat where
+      // all three offensive stats boost simultaneously (Shell Smash ++),
+      // or an omni-boost (+1 to everything, Clangorous Soul / Ancient Power proc).
+      const maxStat = Math.max(selfAtk, selfSatk, selfSpe, selfDef, selfSdef);
+      const omniBoost = selfAtk && selfSatk && selfSpe && selfDef && selfSdef;
+      if (maxStat >= 3 || omniBoost || (selfAtk >= 2 && selfSpe >= 2)) {
+        markCat("setupExtreme", k);
+        continue;
+      }
+
+      // Offensive+Speed combo (Dragon Dance / Quiver Dance / Shift Gear)
+      if ((selfAtk && selfSpe) || (selfSatk && selfSpe)) {
+        markCat("setupMixOff", k);
+        continue;
+      }
+
+      // Single-stat offensive setup
+      if (selfAtk  && !selfSatk && !selfSpe) { markCat("setupAtk", k); continue; }
+      if (selfSatk && !selfAtk  && !selfSpe) { markCat("setupSatk", k); continue; }
+      if (selfSpe  && !selfAtk  && !selfSatk) { markCat("setupSpe", k); continue; }
+
+      // Otherwise: defensive or mixed-defense setup
+      if (totalDef || totalOff) { markCat("setupDef", k); continue; }
+    }
+
+    _moveCatsCache = { cats, buffKind };
+    return _moveCatsCache;
+  }
+
+  // Hidden-ability weather-setter → which weather category to feed.
+  // Abilities trigger changeWeather() on switch-in (explore.js:4027+), so a
+  // mon with `hiddenAbility.drought` doesn't need Sunny Day in slot 1 —
+  // it needs strong fire/fire-boosted moves that benefit from the auto-sun.
+  function weatherFromAbility(abilityId) {
+    if (!abilityId) return null;
+    if (abilityId === "drought")     return "sunny";
+    if (abilityId === "drizzle")     return "rainy";
+    if (abilityId === "sandStream")  return "sandstorm";
+    if (abilityId === "snowWarning") return "hail";
+    if (abilityId === "electricSurge") return "electricTerrain";
+    if (abilityId === "grassySurge")   return "grassyTerrain";
+    if (abilityId === "mistySurge")    return "mistyTerrain";
+    return null;
+  }
+
+  // ─── pickMovesetFor — strategic, archetype-aware moveset builder ──────
+  // Replaces the legacy "slot 1 sig, slot 2 STAB, slot 3 utility" loop
+  // with a role-driven planner:
+  //   1. Infer archetype from BST + hidden ability + signature BP
+  //   2. Guaranteed signature slot at post-Silver (even if BP<65)
+  //   3. Guaranteed egg move slot at post-Silver for B-division and below
+  //      (canonical "genetics + item" rule in Pokechill lets low-div mons
+  //      inherit ANY move; NPCs exploit this)
+  //   4. MANDATORY setup slot matching archetype (Swords Dance for phys,
+  //      Nasty Plot for spec, Dragon Dance for balanced-speed sweepers,
+  //      Calm Mind for bulky special, Iron Defense for walls, Shell Smash
+  //      etc. for explosive sweepers)
+  //   5. STAB + coverage with proper split preference
+  //   6. Priority or secondary STAB filler
+  //
+  // `diff` (from computeRunDifficulty) drives:
+  //   • forceSignature   — slot the signature always post-Gold
+  //   • useEggMove       — force egg move post-Silver
+  //   • forceHiddenAbility — tells us which weather will be up, so we can
+  //                         pick sun/rain-boosted STAB or skip weather setup
   function pickMovesetFor(pkmnId, diff) {
     const p = typeof pkmn !== "undefined" ? pkmn[pkmnId] : null;
     if (!p || typeof move === "undefined") return [];
     const types = Array.isArray(p.type) ? p.type : [p.type];
     const primaryType = types[0];
     const secondaryType = types[1];
+    const { cats, buffKind } = buildMoveCategories();
 
-    // Check division (S / A / B / C / D). B and below unlock universal
-    // move access via the game's genetics+item mechanic.
+    // Division: B/C/D get unrestricted learning (the game lets them learn
+    // ANY move via genetics+item). A/S+ restricted to natural type-gated
+    // pool + GENETIC_MOVES_FOR_ALL. Egg moves always go in.
     let division = "C";
     try {
       if (typeof returnPkmnDivision === "function") division = returnPkmnDivision(p);
     } catch (e) { /* keep default */ }
-    const unrestrictedLearning = (division === "B" || division === "C" || division === "D");
+    const unrestrictedLearning = /^[BCD]$/.test(division);
+    const isLowDivision = unrestrictedLearning;
 
-    // Egg move ID, if this species has one. At Silver+ we always let it
-    // into the learnable pool even for A/S division (canonically egg moves
-    // ARE the way restricted species get their spicy coverage).
-    const eggMoveKey = (diff && diff.useEggMove && p.eggMove && p.eggMove.id)
-      ? p.eggMove.id : null;
+    // Forced moves: signature (at appropriate difficulty) + egg move
+    const sigKey = (p.signature && p.signature.id) || null;
+    const eggKey = (p.eggMove && p.eggMove.id) || null;
 
-    // Natural learnable filter (only applied if division A/S):
-    const isLearnableNatural = (mv) => {
-      if (!mv || !Array.isArray(mv.moveset)) return false;
-      if (mv.moveset.indexOf("all") !== -1) return true;
-      if (mv.moveset.indexOf("normal") !== -1) return true;
-      for (const t of types) {
-        if (t && mv.moveset.indexOf(t) !== -1) return true;
-      }
-      return false;
-    };
-    // A / S division also unlock the curated genetic pool.
+    // Archetype inference — drives which setup bucket we draw from.
+    const stats = p.bst || { hp: 3, atk: 3, def: 3, satk: 3, sdef: 3, spe: 3 };
+    const atk = stats.atk || 0, satk = stats.satk || 0;
+    const spe = stats.spe || 0, hp = stats.hp || 0;
+    const def = stats.def || 0, sdef = stats.sdef || 0;
+    const isPhys = atk > satk + 15;
+    const isSpec = satk > atk + 15;
+    const isFast = spe >= 95;
+    const isBulky = (hp + def + sdef) >= 260;
+
+    // Weather tie-in. If the mon has a weather-setter hidden ability AND
+    // the diff forces hidden ability, the weather is auto-set — boosted
+    // STAB becomes the main win condition instead of Sunny Day.
+    const hiddenAbilityId = (p.hiddenAbility && p.hiddenAbility.id) || null;
+    const autoWeather = (diff && diff.forceHiddenAbility) ? weatherFromAbility(hiddenAbilityId) : null;
+
+    // Build learnable pool filter.
+    const eggMoveActive = !!(diff && diff.useEggMove && eggKey);
     const isLearnable = (mv, key) => {
       if (!mv) return false;
-      if (key && eggMoveKey && key === eggMoveKey) return true; // egg move always in
-      if (!Array.isArray(mv.moveset)) return false;
-      if (unrestrictedLearning) return true; // B or lower → any move
-      if (isLearnableNatural(mv)) return true;
-      // A / S → curated genetic moves on top of natural.
+      if (key && eggMoveActive && key === eggKey) return true;     // egg move always in post-Silver
+      if (key && sigKey && key === sigKey) return true;            // signature always in
+      if (!Array.isArray(mv.moveset)) return false;                // signature-only etc. handled above
+      if (unrestrictedLearning) return true;
+      if (mv.moveset.indexOf("all") !== -1) return true;
+      if (mv.moveset.indexOf("normal") !== -1) return true;
+      for (const t of types) { if (t && mv.moveset.indexOf(t) !== -1) return true; }
       return !!(key && GENETIC_MOVES_FOR_ALL.has(key));
     };
 
-    const chosen = [];
-    const keyOf = (mv) => Object.keys(move).find((k) => move[k] === mv);
-    const push = (mvOrId) => {
-      if (!mvOrId) return;
-      const key = typeof mvOrId === "string" ? mvOrId : keyOf(mvOrId);
-      if (!key || chosen.indexOf(key) !== -1 || chosen.length >= 4) return;
-      if (move[key] && move[key].restricted) return; // skip restricted (1-per-team rule)
-      chosen.push(key);
-    };
-
-    // Pre-filter & classify the Pokémon's learnable pool
     const pool = [];
     for (const [k, mv] of Object.entries(move)) {
+      if (mv && mv.notUsableByEnemy) continue;                     // canonical "player-only" flag
       if (!isLearnable(mv, k)) continue;
       pool.push({ id: k, mv });
     }
 
-    // ── Split preference from BST (Phys/Spec/Mixed) ────────────────────
-    // A high-Atk / low-SAtk mon shouldn't pack special attacks and vice
-    // versa — gives the NPC a moveset that actually leverages their
-    // stats. 15-point gap threshold keeps mixed mons genuinely mixed.
-    const atk = (p.bst && p.bst.atk) || 0;
-    const satk = (p.bst && p.bst.satk) || 0;
-    const isPhys = atk > satk + 15;
-    const isSpec = satk > atk + 15;
-    const splitMatches = (mv) => {
+    const chosen = [];
+    // `restricted` in Pokechill is a TEAM-level constraint (at most one
+    // such move across the whole team). The battle engine enforces it —
+    // we don't police it at the per-mon picker level, or signature +
+    // Nasty Plot / Dragon Dance mons lose their setup slot. Signature
+    // moves and strongest boosters are OFTEN both restricted; blocking
+    // at pick-time yielded movesets like [kinesis, futureSight, stoneEdge,
+    // meteorBeam] — sig but zero setup — exactly what the user reported.
+    const push = (key) => {
+      if (!key || chosen.indexOf(key) !== -1 || chosen.length >= 4) return false;
+      const mv = move[key];
       if (!mv) return false;
-      if (mv.split === "status") return true; // status = always OK
-      if (isPhys) return mv.split !== "special";
-      if (isSpec) return mv.split !== "physical";
-      return true; // mixed attackers use either split
+      chosen.push(key);
+      return true;
     };
 
-    // Weighted-random pick inside the top-N of a sorted list — swaps the
-    // deterministic [0] pick for real variety between trainers. Top N is
-    // biased toward stronger moves (index 0 weight × N, index 1 × N-1 …)
-    // so the player still faces competent sets, not pure randomness.
+    const splitMatches = (mv) => {
+      if (!mv) return false;
+      if (mv.split === "status") return true;
+      if (isPhys) return mv.split !== "special";
+      if (isSpec) return mv.split !== "physical";
+      return true;
+    };
+
     const pickTopN = (list, n) => {
       if (!list.length) return null;
       const slice = list.slice(0, Math.min(n, list.length));
@@ -1053,133 +1222,165 @@
       return slice[0];
     };
 
-    // ── Build categorised move shortlists ──────────────────────────────
+    // ── Attack shortlists (sorted by power DESC) ──
     const stabPrimary = pool
-      .filter((c) => c.mv.type === primaryType && c.mv.power >= 50 && splitMatches(c.mv))
+      .filter((c) => c.mv.type === primaryType && c.mv.power >= 60 && splitMatches(c.mv))
       .sort((a, b) => (b.mv.power || 0) - (a.mv.power || 0));
     const stabSecondary = secondaryType
-      ? pool.filter((c) => c.mv.type === secondaryType && c.mv.power >= 50 && splitMatches(c.mv))
+      ? pool.filter((c) => c.mv.type === secondaryType && c.mv.power >= 60 && splitMatches(c.mv))
             .sort((a, b) => (b.mv.power || 0) - (a.mv.power || 0))
       : [];
     const coverageAttacks = pool
-      .filter((c) => c.mv.power >= 60
+      .filter((c) => c.mv.power >= 70
                    && c.mv.type !== primaryType
                    && c.mv.type !== secondaryType
                    && c.mv.type !== "normal"
                    && splitMatches(c.mv))
       .sort((a, b) => (b.mv.power || 0) - (a.mv.power || 0));
-    // "Normal" coverage split (Body Slam, Facade, Return) — useful for
-    // both splits, adds neutral coverage. Kept separate so we can pick
-    // once from it as flavour.
     const normalAttacks = pool
-      .filter((c) => c.mv.type === "normal" && c.mv.power >= 50 && splitMatches(c.mv))
+      .filter((c) => c.mv.type === "normal" && c.mv.power >= 60 && splitMatches(c.mv))
       .sort((a, b) => (b.mv.power || 0) - (a.mv.power || 0));
-    // Priority / speed-leveraging attacks (faster timer via `timer` field).
     const priorityAttacks = pool
-      .filter((c) => c.mv.power > 0 && c.mv.timer !== undefined && splitMatches(c.mv));
-    // Status-category moves (power 0 = non-attack). rarity >= 1 filters
-    // out junk placeholders only; keeps Leer / Growl / Tail Whip etc.
-    const utilityMoves = pool
-      .filter((c) => !c.mv.power && (c.mv.rarity || 0) >= 1);
-    // Tag each utility move once so we don't re-run the regex for
-    // every bucket filter. Keyed by move key → "buff" / "debuff" / "other".
-    const utilityKind = new Map();
-    const STAT_BUFF_RE = /atkup[12]|satkup[12]|defup[12]|sdefup[12]|speup[12]/;
-    const DEBUFF_RE = /poisoned|burn|paralysis|sleep|confused|atkdown|satkdown|defdown|sdefdown|spedown/;
-    for (const c of utilityMoves) {
-      let kind = "other";
-      if (typeof c.mv.hitEffect === "function") {
-        const src = c.mv.hitEffect.toString();
-        if (STAT_BUFF_RE.test(src)) kind = "buff";
-        else if (DEBUFF_RE.test(src)) kind = "debuff";
+      .filter((c) => c.mv.power > 0 && c.mv.timer !== undefined && splitMatches(c.mv))
+      .sort((a, b) => (b.mv.power || 0) - (a.mv.power || 0));
+
+    // Learnable-only filter for setup buckets (they live as move IDs).
+    const learnableCat = (bucketName) => (cats[bucketName] || [])
+      .filter((k) => pool.some((c) => c.id === k));
+
+    // Archetype-ordered setup preference. At post-Silver we REQUIRE a
+    // setup slot; the order below controls which one we reach for first
+    // based on the mon's stat profile.
+    const setupPref = (() => {
+      if (isPhys && isFast)              return ["setupMixOff", "setupAtk", "setupExtreme", "setupSpe", "setupDef"];
+      if (isSpec && isFast)              return ["setupMixOff", "setupSatk", "setupExtreme", "setupSpe", "setupDef"];
+      if (isPhys)                        return ["setupAtk", "setupExtreme", "setupMixOff", "setupSpe", "setupDef"];
+      if (isSpec)                        return ["setupSatk", "setupExtreme", "setupMixOff", "setupSpe", "setupDef"];
+      if (isBulky)                       return ["setupDef", "setupAtk", "setupSatk", "setupMixOff"];
+      return ["setupMixOff", "setupExtreme", "setupAtk", "setupSatk", "setupSpe", "setupDef"];
+    })();
+
+    // ── SLOT 1: Signature ──
+    // Rules:
+    //   • If signature BP ≥ 80                       → always slot it
+    //   • If diff.forceSignature (Gold+)             → always slot it
+    //   • Else if BP ≥ 65 and split matches          → slot it
+    // This guarantees mons with real signatures (Frenzy Plant 180,
+    // Sacred Fire 120, Spacial Rend 120) keep their identity.
+    if (sigKey) {
+      const sig = move[sigKey];
+      if (sig) {
+        const forceSig = diff && diff.forceSignature;
+        const strongSig = (sig.power || 0) >= 80;
+        const okSig = (sig.power || 0) >= 65 && splitMatches(sig);
+        if (forceSig || strongSig || okSig) push(sigKey);
       }
-      utilityKind.set(c.id, kind);
-    }
-    const statBoost = utilityMoves.filter((c) => utilityKind.get(c.id) === "buff");
-    const statusOrDebuff = utilityMoves.filter((c) => utilityKind.get(c.id) === "debuff");
-    const healsWeatherField = utilityMoves.filter((c) => utilityKind.get(c.id) === "other");
-
-    // ── Role planner: build a 4-slot moveset with variety guarantees ──
-    // Slot 1: signature if strong, else top STAB primary
-    // Slot 2: STAB secondary (if dual-type) OR strong coverage
-    // Slot 3: utility — prefer stat buff > status/debuff > heal/weather
-    // Slot 4: flavour — priority, coverage 2, normal-type, or 2nd utility
-    //
-    // Each pick uses pickTopN with a small N (3-5) so two similar
-    // Pokémon don't end up with identical movesets.
-
-    // Slot 1 — signature FIRST if power decent, OR if the difficulty tier
-    // forces it (Gold round / post-Gold rematch → boss-caliber mons keep
-    // their identity move even when its raw BP is mediocre).
-    const forceSig = diff && diff.forceSignature && p.signature;
-    if (p.signature && (p.signature.power >= 65 || forceSig)) push(p.signature);
-    else {
-      const s1 = pickTopN(stabPrimary, 3);
-      if (s1) push(s1.id);
     }
 
-    // Egg move — if the species has one and we're at Silver+, ensure it
-    // lands in the set. It bypasses the utility/flavour slots and slots
-    // itself in whichever spare slot exists. This is the primary way
-    // restricted-division mons get interesting coverage at higher rounds.
-    if (eggMoveKey && move[eggMoveKey]) push(eggMoveKey);
+    // ── SLOT 2: Egg move (post-Silver, esp. low divisions) ──
+    // Low-division mons inherit egg moves as their only "spicy" coverage
+    // per the game's genetics rule. For A/S+ we still honour the egg
+    // move but it's less unique (they already have wide pools).
+    if (eggMoveActive && eggKey && move[eggKey]) {
+      if (isLowDivision || chosen.length === 0) push(eggKey);
+      // high divisions still get it ~50% to keep variety
+      else if (Math.random() < 0.5) push(eggKey);
+    }
 
-    // Slot 2 — secondary STAB > coverage
-    if (secondaryType && stabSecondary.length) {
-      const s2 = pickTopN(stabSecondary, 3);
-      if (s2) push(s2.id);
-    } else {
-      const cov = pickTopN(coverageAttacks, 4);
+    // ── SLOT 3: MANDATORY SETUP at post-Silver ──
+    // Skipped if we're pre-Silver (IV rating < 3) — early-round trainers
+    // keep their movepool simple. At Silver+ every mon gets a setup move
+    // that matches its archetype; at Gold+ extreme boosters (Shell Smash,
+    // Belly Drum) start showing up.
+    const allowSetup = !diff || (diff.ivRating || 0) >= 3;
+    if (allowSetup && chosen.length < 4) {
+      let setupKey = null;
+      for (const bucket of setupPref) {
+        const learnables = learnableCat(bucket);
+        if (!learnables.length) continue;
+        // Bias: at Gold+ prefer extreme boosters when available.
+        const prefExtreme = diff && (diff.mult || 0) >= 1 && (diff.forceSignature || diff.ivRating === 6);
+        if (prefExtreme && bucket !== "setupExtreme") {
+          const extreme = learnableCat("setupExtreme");
+          if (extreme.length && Math.random() < 0.35) { setupKey = extreme[Math.floor(Math.random() * extreme.length)]; break; }
+        }
+        setupKey = learnables[Math.floor(Math.random() * learnables.length)];
+        if (setupKey) break;
+      }
+      if (setupKey) push(setupKey);
+    }
+
+    // ── SLOT 4a: Weather / terrain setter when it synergizes ──
+    // If the mon doesn't auto-set weather via ability AND a STAB damage
+    // move would be boosted by one of them, 20% chance to slot the
+    // weather. Gives us Rain Dance + Hydro Pump / Sunny Day + Fire Blast
+    // combos on support-y mons.
+    if (!autoWeather && chosen.length < 4 && Math.random() < 0.20) {
+      const stabs = new Set(types);
+      let weatherBucket = null;
+      if (stabs.has("fire"))      weatherBucket = "weatherSun";
+      else if (stabs.has("water")) weatherBucket = "weatherRain";
+      else if (stabs.has("rock") || stabs.has("ground") || stabs.has("steel")) weatherBucket = "weatherSand";
+      else if (stabs.has("ice"))   weatherBucket = "weatherHail";
+      else if (stabs.has("electric")) weatherBucket = "terrainElec";
+      else if (stabs.has("grass"))    weatherBucket = "terrainGrass";
+      else if (stabs.has("fairy"))    weatherBucket = "terrainMisty";
+      if (weatherBucket) {
+        const list = learnableCat(weatherBucket);
+        if (list.length) push(list[Math.floor(Math.random() * list.length)]);
+      }
+    }
+
+    // ── SLOT 4b: Primary STAB (unless signature already covered it) ──
+    if (chosen.length < 4) {
+      const primaryKey = pickTopN(stabPrimary, 3);
+      if (primaryKey) push(primaryKey.id);
+    }
+
+    // ── SLOT 4c: Secondary STAB or coverage ──
+    if (chosen.length < 4) {
+      if (stabSecondary.length) {
+        const s2 = pickTopN(stabSecondary, 3);
+        if (s2) push(s2.id);
+      } else {
+        const cov = pickTopN(coverageAttacks, 4);
+        if (cov) push(cov.id);
+      }
+    }
+
+    // ── SLOT 4d: Priority (for sweepers) or coverage fallback ──
+    if (chosen.length < 4) {
+      if (isFast || isPhys) {
+        const prio = pickTopN(priorityAttacks, 3);
+        if (prio) push(prio.id);
+      }
+    }
+
+    // ── Coverage fill ──
+    if (chosen.length < 4) {
+      const cov = pickTopN(coverageAttacks, 5);
       if (cov) push(cov.id);
-      else {
-        // No coverage → backup with 2nd STAB primary
-        const backupStab = pickTopN(stabPrimary.slice(1), 3);
-        if (backupStab) push(backupStab.id);
-      }
-    }
-
-    // Slot 3 — utility (buff > debuff > heal/weather), always if possible.
-    // Shuffle a COPY (`.slice()`) so we don't mutate shared bucket state
-    // between successive moveset generations.
-    for (const bucket of [statBoost, statusOrDebuff, healsWeatherField]) {
-      if (chosen.length >= 3) break;
-      const shuffled = bucket.slice().sort(() => Math.random() - 0.5);
-      const pick = pickTopN(shuffled, 4);
-      if (pick) { push(pick.id); break; }
-    }
-
-    // Slot 4 — flavour: priority → normal coverage → coverage 2 → any attack
-    if (chosen.length < 4) {
-      const flavourBuckets = [priorityAttacks, normalAttacks, coverageAttacks.slice(1), stabPrimary.slice(1)];
-      for (const bucket of flavourBuckets) {
-        if (chosen.length >= 4) break;
-        const pick = pickTopN(bucket, 4);
-        if (pick) { push(pick.id); break; }
-      }
-    }
-
-    // ── Fallback fills if any slot is still empty ──────────────────────
-    // (Rare — defensive for Pokémon with tiny learn pools.)
-    if (chosen.length < 4) {
-      // Add a primary STAB if we skipped it earlier.
-      if (stabPrimary[0]) push(stabPrimary[0].id);
     }
     if (chosen.length < 4) {
-      const allAttacks = pool
+      const backup = pickTopN(stabPrimary.slice(1), 4);
+      if (backup) push(backup.id);
+    }
+    if (chosen.length < 4) {
+      const nrm = pickTopN(normalAttacks, 4);
+      if (nrm) push(nrm.id);
+    }
+
+    // ── Emergency: anything learnable with power ──
+    if (chosen.length < 4) {
+      const anyAtk = pool
         .filter((c) => c.mv.power > 0 && splitMatches(c.mv))
         .sort((a, b) => (b.mv.power || 0) - (a.mv.power || 0));
-      for (const c of allAttacks) {
+      for (const c of anyAtk) {
         if (chosen.length >= 4) break;
         push(c.id);
       }
     }
-    // Absolute last-resort filler: anything learnable, any split.
-    if (chosen.length < 4) {
-      for (const c of pool) {
-        if (chosen.length >= 4) break;
-        push(c.id);
-      }
-    }
+    // Absolute last resort — Tackle, so we never return <4.
     while (chosen.length < 4 && move.tackle) {
       if (chosen.indexOf("tackle") !== -1) break;
       chosen.push("tackle");
@@ -6786,6 +6987,31 @@
     const thisRound = (run && run.round ? run.round : 0) + 1;
     const diff = computeRunDifficulty(thisRound, facility);
 
+    // "Mini-boss" bump: the LAST non-boss battle of a round-set (battle
+    // 7/7 of Tower/Palace/Arena/Factory non-boss rounds, floor 7 of a
+    // non-boss Pyramide) feels like a pre-fight warm-up unless we make
+    // it noticeably stronger than battles 1–6. Bumps:
+    //   • HP multiplier +2
+    //   • IV rating +1 (capped at 6)
+    //   • Ability always hidden (if defined)
+    // Skipped for actual boss rounds (brain appears there) and for
+    // facilities with their own structure (Dôme bracket / Pike doors).
+    const perRoundBattles = battlesPerRound(facility);
+    const isStandardMultiBattle = perRoundBattles > 1
+      && !isDomeFacility(facility)
+      && !isPikeFacility(facility);
+    const bossInfoThis = getBossRoundInfo(thisRound, facility);
+    const isLastBattleOfNonBossRound = run
+      && isStandardMultiBattle
+      && !bossInfoThis
+      && (run.battleInRound || 1) === perRoundBattles;
+    if (isLastBattleOfNonBossRound) {
+      diff.hpMult = (diff.hpMult || 4) + 2;
+      diff.ivRating = Math.min(6, (diff.ivRating || 0) + 1);
+      diff.forceHiddenAbility = true;
+      diff.lastBattleBump = true;
+    }
+
     // Apply enemy runtime stat overrides (IVs + ability) to the Pokémon in
     // the effective team. Non-Factory only — Factory already controls
     // pkmn[id].ivs/ability via applyFactoryMoves on the RENTAL side (which
@@ -7707,6 +7933,8 @@
     restoreEnemyRuntimeStats,
     pickMovesetFor,
     simulateNatureFor,
+    buildMoveCategories,
+    weatherFromAbility,
     FACILITIES,
     // Pool debug
     getPool,
