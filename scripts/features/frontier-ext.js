@@ -842,17 +842,15 @@
       ? {
           round: "Round",
           vs: "vs",
-          combatTbd: "⚙️ Le combat réel n'est pas encore branché — simule le résultat :",
-          simWin: "✓ Simuler une victoire",
-          simLoss: "✗ Simuler une défaite",
+          warn: "⚠️ Tous tes Pokémon doivent être niveau 100. Sinon le combat sera très dur !",
+          launch: "⚔️ Lancer le combat",
           cancel: "Annuler",
         }
       : {
           round: "Round",
           vs: "vs",
-          combatTbd: "⚙️ Real combat not wired yet — simulate the outcome:",
-          simWin: "✓ Simulate win",
-          simLoss: "✗ Simulate loss",
+          warn: "⚠️ All your Pokémon must be level 100. The battle will be very hard otherwise!",
+          launch: "⚔️ Launch battle",
           cancel: "Cancel",
         };
 
@@ -904,10 +902,9 @@
     if (bottom) {
       bottom.style.display = "block";
       bottom.innerHTML = `
-        <div style="padding:0.4rem 0.8rem;color:var(--dark1,#2a1a0a);font-style:italic;">${t.combatTbd}</div>
+        <div style="padding:0.4rem 0.8rem;color:#7a2e1a;font-size:0.85rem;text-align:center;">${t.warn}</div>
         <div class="frontier-ext-run-actions">
-          <button class="frontier-ext-action-btn primary" data-action="sim-win">${t.simWin}</button>
-          <button class="frontier-ext-action-btn danger" data-action="sim-loss">${t.simLoss}</button>
+          <button class="frontier-ext-action-btn primary" data-action="launch">${t.launch}</button>
           <button class="frontier-ext-action-btn" data-action="back">${t.cancel}</button>
         </div>
       `;
@@ -952,33 +949,8 @@
       openFacilityPreview(facility);
       return;
     }
-    if (action === "sim-win") {
-      if (!run) return;
-      run.round += 1;
-      saved.frontierExt.streaks[facility.id] = run.round;
-      if (run.round > (saved.frontierExt.maxStreaks[facility.id] || 0)) {
-        saved.frontierExt.maxStreaks[facility.id] = run.round;
-      }
-      if (run.round === SILVER_ROUND) {
-        saved.frontierExt.symbols[facility.id].silver = true;
-      } else if (run.round === GOLD_ROUND) {
-        saved.frontierExt.symbols[facility.id].gold = true;
-      }
-      run.upcomingTrainer = null;
-      openFacilityPreview(facility);
-      return;
-    }
-    if (action === "sim-loss") {
-      if (run) {
-        const finalRound = run.round;
-        if (finalRound > (saved.frontierExt.maxStreaks[facility.id] || 0)) {
-          saved.frontierExt.maxStreaks[facility.id] = finalRound;
-        }
-      }
-      saved.frontierExt.activeRun = null;
-      saved.frontierExt.streaks[facility.id] = 0;
-      if (typeof updateFrontier === "function") updateFrontier();
-      if (typeof closeTooltip === "function") closeTooltip();
+    if (action === "launch") {
+      launchCombat(facility);
       return;
     }
   }
@@ -1080,6 +1052,174 @@
     }
   }
 
+  // ─── 6c. REAL COMBAT LAUNCH (ÉTAPE 2) ─────────────────────────────────────
+  // Ephemeral area id used throughout. Always reassigned before each fight.
+  const RUN_AREA_ID = "frontierExtRun";
+
+  // Construct an `areas[RUN_AREA_ID]` object with the trainer's team. Mirrors
+  // the shape of vanilla vsTrainer areas (areasDictionary.js line 5152) so
+  // the combat engine at explore.js:484 reads slot1/slot1Moves/... natively.
+  function buildEphemeralRunArea(trainer, facility) {
+    if (typeof areas === "undefined" || typeof pkmn === "undefined") return null;
+
+    const team = {};
+    trainer.team.forEach((slot, i) => {
+      const slotN = i + 1;
+      if (!pkmn[slot.id]) return;
+      team["slot" + slotN] = pkmn[slot.id];
+      team["slot" + slotN + "Moves"] = slot.moves;
+    });
+
+    areas[RUN_AREA_ID] = {
+      id: RUN_AREA_ID,
+      name: trainer.name,
+      background: facility.background,
+      sprite: trainer.sprite,
+      difficulty: trainer.tier ? trainer.tier * 10 + 20 : 40,
+      trainer: true,
+      type: "vs",
+      level: 100,
+      team,
+      fieldEffect: [],
+      itemReward: {}, // no items for non-boss rounds; boss could add
+      defeated: false,
+      hpPercentage: 100,
+      // Called by explore.js when all slots are defeated. We let our
+      // leaveCombat wrapper handle state advancement; here we just mark
+      // the area done so the wrapper can tell victory from defeat.
+      encounterEffect: function () {
+        /* no-op — handled in leaveCombat hook */
+      },
+    };
+    return areas[RUN_AREA_ID];
+  }
+
+  // Kick off a real combat round. Same flow as vanilla tile click:
+  //   1) set saved.currentAreaBuffer
+  //   2) show the team-preview menu
+  //   3) hide explore menu
+  // The player then picks their team + confirms, which triggers the
+  // vanilla combat start path. No need to re-implement combat.
+  function launchCombat(facility) {
+    ensureSaveSlot();
+    const run = saved.frontierExt.activeRun;
+    if (!run || run.facilityId !== facility.id) return;
+
+    const nextRound = run.round + 1;
+    const isSilverBoss = nextRound === SILVER_ROUND;
+    const isGoldBoss = nextRound === GOLD_ROUND;
+
+    // Regenerate (or keep) the upcoming trainer for this round
+    let trainer;
+    if (isSilverBoss || isGoldBoss) {
+      const brainTeam = isSilverBoss ? facility.brain.teamSilver : facility.brain.teamGold;
+      trainer = {
+        name: window.gameLang === "fr" ? facility.brain.nameFr : facility.brain.nameEn,
+        sprite: facility.brain.sprite,
+        team: brainTeam
+          ? brainTeam.map((id) => ({ id, moves: pickMovesetFor(id) }))
+          : [1, 2, 3].map(() => {
+              const id = pickFromPool(3);
+              return { id, moves: pickMovesetFor(id) };
+            }),
+        tier: 3,
+        isBoss: true,
+      };
+    } else {
+      trainer = run.upcomingTrainer || generateTrainer(nextRound, facility);
+    }
+    run.upcomingTrainer = trainer;
+
+    const area = buildEphemeralRunArea(trainer, facility);
+    if (!area) return;
+
+    // Follow the same team-preview opening flow as the vanilla tiles
+    // (explore.js Battle Tower tile click handler at line ~7399).
+    try {
+      saved.currentAreaBuffer = RUN_AREA_ID;
+      const previewExit = document.getElementById("preview-team-exit");
+      const teamMenu = document.getElementById("team-menu");
+      const menuBtn = document.getElementById("menu-button-parent");
+      const exploreMenu = document.getElementById("explore-menu");
+      if (previewExit) previewExit.style.display = "flex";
+      if (teamMenu) {
+        teamMenu.style.zIndex = "50";
+        teamMenu.style.display = "flex";
+      }
+      if (menuBtn) menuBtn.style.display = "none";
+      if (typeof updatePreviewTeam === "function") updatePreviewTeam();
+      if (typeof afkSeconds !== "undefined") window.afkSeconds = 0;
+      if (exploreMenu) exploreMenu.style.display = "none";
+      if (typeof closeTooltip === "function") closeTooltip();
+    } catch (e) {
+      console.error("[frontier-ext] failed to open preview menu:", e);
+    }
+  }
+
+  // Called from the leaveCombat hook on victory.
+  function onRunVictory() {
+    ensureSaveSlot();
+    const run = saved.frontierExt.activeRun;
+    if (!run) return;
+    run.round += 1;
+    saved.frontierExt.streaks[run.facilityId] = run.round;
+    if (run.round > (saved.frontierExt.maxStreaks[run.facilityId] || 0)) {
+      saved.frontierExt.maxStreaks[run.facilityId] = run.round;
+    }
+    if (run.round === SILVER_ROUND) saved.frontierExt.symbols[run.facilityId].silver = true;
+    else if (run.round === GOLD_ROUND) saved.frontierExt.symbols[run.facilityId].gold = true;
+    run.upcomingTrainer = null;
+    // Player returns to explore menu naturally via leaveCombat — they'll
+    // click the tile again to continue or go elsewhere.
+  }
+
+  function onRunDefeat() {
+    ensureSaveSlot();
+    const run = saved.frontierExt.activeRun;
+    if (!run) return;
+    const final = run.round;
+    if (final > (saved.frontierExt.maxStreaks[run.facilityId] || 0)) {
+      saved.frontierExt.maxStreaks[run.facilityId] = final;
+    }
+    saved.frontierExt.activeRun = null;
+    saved.frontierExt.streaks[run.facilityId] = 0;
+  }
+
+  // Wrap leaveCombat so we can detect which side won when it returns from
+  // a frontier-ext run area. Installed once at bootstrap, retries until the
+  // game's leaveCombat is defined.
+  function installCombatHook() {
+    if (typeof window.leaveCombat !== "function") {
+      setTimeout(installCombatHook, 200);
+      return;
+    }
+    if (window.__frontierExtLeaveCombatHooked) return;
+    window.__frontierExtLeaveCombatHooked = true;
+    const orig = window.leaveCombat;
+    window.leaveCombat = function () {
+      const wasFrontierRun = typeof saved !== "undefined" && saved &&
+                             saved.currentArea === RUN_AREA_ID;
+      // explore.js sets `areas[currentArea].defeated = true` BEFORE calling
+      // leaveCombat() on victory. If the flag is set when we arrive here,
+      // the player won this round; otherwise they lost (or abandoned).
+      const wasVictory = wasFrontierRun &&
+                         areas[RUN_AREA_ID] &&
+                         areas[RUN_AREA_ID].defeated === true;
+      const res = orig.apply(this, arguments);
+      if (wasFrontierRun) {
+        try {
+          if (wasVictory) onRunVictory();
+          else onRunDefeat();
+          // Clean up the ephemeral area so it doesn't clutter the areas dict
+          delete areas[RUN_AREA_ID];
+        } catch (e) {
+          console.error("[frontier-ext] post-combat failed:", e);
+        }
+      }
+      return res;
+    };
+  }
+
   // ─── 7. INJECTION HOOK ────────────────────────────────────────────────────
   // Patch updateFrontier() so our tiles get appended every time the Frontier
   // menu re-renders. Uses the same funcsToHook pattern as the i18n engine.
@@ -1119,6 +1259,7 @@
   function bootstrap() {
     installInjection();
     installHelpTooltip();
+    installCombatHook();
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", bootstrap);
@@ -1131,6 +1272,7 @@
     facilities: FACILITIES,
     SILVER_ROUND,
     GOLD_ROUND,
+    RUN_AREA_ID,
     ensureSaveSlot,
     buildTile,
     openFacilityPreview,
@@ -1138,6 +1280,10 @@
     pickMovesetFor,
     pickFromPool,
     handleRunAction,
+    launchCombat,
+    buildEphemeralRunArea,
+    onRunVictory,
+    onRunDefeat,
     isUnlocked,
     // quick helper to reset all runs/symbols for testing
     resetAll: () => {
