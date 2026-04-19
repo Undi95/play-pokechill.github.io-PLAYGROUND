@@ -1094,6 +1094,39 @@
     return areas[RUN_AREA_ID];
   }
 
+  // Count how many slots of the currently-selected preview team are filled.
+  // Used to enforce the Frontier rule of exactly 3 Pokémon per team.
+  function currentPreviewTeamSize() {
+    try {
+      const pt = saved.previewTeams[saved.currentPreviewTeam];
+      if (!pt) return 0;
+      let n = 0;
+      for (const slot of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
+        if (pt[slot] && pt[slot].pkmn) n++;
+      }
+      return n;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function showTeamSizeError() {
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const title = lang === "fr" ? "Équipe trop grande" : "Team too large";
+    const msg = lang === "fr"
+      ? "Les Facilities Secrètes suivent les règles Gen 3 : exactement 3 Pokémon par équipe. Retire les Pokémon supplémentaires via l'éditeur d'équipe avant de lancer un combat."
+      : "Secret Facilities use Gen 3 rules: exactly 3 Pokémon per team. Remove extras via the team editor before starting a fight.";
+    const top = document.getElementById("tooltipTop");
+    const titleEl = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+    if (top) top.style.display = "none";
+    if (titleEl) { titleEl.style.display = "block"; titleEl.innerHTML = "⚠️ " + title; }
+    if (mid) { mid.style.display = "block"; mid.innerHTML = `<div style="padding:0.6rem 0.8rem;">${msg}</div>`; }
+    if (bottom) bottom.style.display = "none";
+    if (typeof openTooltip === "function") openTooltip();
+  }
+
   // Kick off a real combat round. Same flow as vanilla tile click:
   //   1) set saved.currentAreaBuffer
   //   2) show the team-preview menu
@@ -1104,6 +1137,14 @@
     ensureSaveSlot();
     const run = saved.frontierExt.activeRun;
     if (!run || run.facilityId !== facility.id) return;
+
+    // Frontier rule: teams of exactly 3 Pokémon. Refuse the launch if the
+    // player's preview team has anything other than 3.
+    const teamSize = currentPreviewTeamSize();
+    if (teamSize !== 3) {
+      showTeamSizeError();
+      return;
+    }
 
     const nextRound = run.round + 1;
     const isSilverBoss = nextRound === SILVER_ROUND;
@@ -1210,8 +1251,12 @@
         try {
           if (wasVictory) onRunVictory();
           else onRunDefeat();
-          // Clean up the ephemeral area so it doesn't clutter the areas dict
-          delete areas[RUN_AREA_ID];
+          // DO NOT delete areas[RUN_AREA_ID] here — the game calls
+          // exitCombat() *after* leaveCombat() (triggered by the end-of-
+          // battle screen buttons), and it reads areas[saved.lastAreaJoined]
+          // at explore.js:780. Removing the area causes an uncaught
+          // TypeError. Next round's buildEphemeralRunArea() will overwrite
+          // the slot, so leaving it in place is safe.
         } catch (e) {
           console.error("[frontier-ext] post-combat failed:", e);
         }
