@@ -349,11 +349,67 @@
         z-index: 5;
         filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.8));
       }
+      /* Section divider between vanilla facilities (bound by division rules
+         shown in the header banner) and our secret section (Open Level,
+         Gen 3 canonical rules, no division restriction). */
+      .frontier-ext-divider {
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+        margin: 1rem 0 0.4rem;
+        padding: 0.4rem 0.8rem;
+        background: linear-gradient(90deg,
+          rgba(157, 78, 221, 0.15),
+          rgba(157, 78, 221, 0.35) 50%,
+          rgba(157, 78, 221, 0.15));
+        border-top: 2px dashed rgba(207, 168, 250, 0.7);
+        border-bottom: 2px dashed rgba(207, 168, 250, 0.7);
+        color: #fff;
+        text-align: center;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .frontier-ext-divider-title {
+        font-size: 1.1rem;
+        font-weight: bold;
+        letter-spacing: 0.05em;
+        color: #e0c3ff;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+      }
+      .frontier-ext-divider-sub {
+        font-size: 0.85rem;
+        opacity: 0.85;
+        font-style: italic;
+      }
     `;
     const style = document.createElement("style");
     style.id = "frontier-ext-css";
     style.textContent = css;
     document.head.appendChild(style);
+  }
+
+  // ─── 4b. SECTION DIVIDER ──────────────────────────────────────────────────
+  // Renders a labelled band between the vanilla facilities (division-locked)
+  // and our secret section (Open Level, no division rules).
+  function buildDivider() {
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const t = lang === "fr"
+      ? {
+          title: "⚔️ Facilities Secrètes",
+          sub: "Règles Gen 3 originales · Niveau fixé à 50 · Pas de restriction de division",
+        }
+      : {
+          title: "⚔️ Secret Facilities",
+          sub: "Canonical Gen 3 rules · Open Level 50 · No division restriction",
+        };
+
+    const div = document.createElement("div");
+    div.className = "frontier-ext-divider";
+    div.innerHTML = `
+      <span class="frontier-ext-divider-title">${t.title}</span>
+      <span class="frontier-ext-divider-sub">${t.sub}</span>
+    `;
+    return div;
   }
 
   // ─── 5. TILE BUILDER ──────────────────────────────────────────────────────
@@ -597,6 +653,10 @@
         injectStyles();
         const listing = document.getElementById("frontier-listing");
         if (!listing) return res;
+        // Section header separating the vanilla facilities (division-locked,
+        // shown in the league banner at the top) from our secret section
+        // (Open Level, no division rules, Gen 3 canonical rulesets).
+        listing.appendChild(buildDivider());
         // Append our tiles after whatever the original rendered.
         for (const facility of FACILITIES) {
           listing.appendChild(buildTile(facility));
