@@ -262,16 +262,19 @@
         const brainTeam = bossInfo.kind === "silver"
           ? facility.brain.teamSilver
           : facility.brain.teamGold;
+        // Clamp the brain team to the Dome's 2-Pokémon rule
+        const size = expectedTeamSize(facility);
+        const teamIds = brainTeam ? brainTeam.slice(0, size) : null;
         trainers.push({
           name: lang === "fr" ? facility.brain.nameFr : facility.brain.nameEn,
           sprite: facility.brain.sprite,
-          team: brainTeam
-            ? brainTeam.map((id) => ({
+          team: teamIds
+            ? teamIds.map((id) => ({
                 id,
                 moves: pickMovesetFor(id),
                 nature: simulateNatureFor(id),
               }))
-            : [1, 2, 3].map(() => {
+            : Array.from({ length: size }, () => {
                 const id = pickFromPool(5);
                 return { id, moves: pickMovesetFor(id), nature: simulateNatureFor(id) };
               }),
@@ -674,12 +677,6 @@
     const lang = window.gameLang === "fr" ? "fr" : "en";
     const { sprite, name } = pickSpriteAndName(lang);
 
-    // Round + multiplier based tier scaling.
-    //   r 1-2              → tier 1 (BST 400-499)
-    //   r 3-5              → tier 2 (BST 500-579)
-    //   r 6-48             → tier 3 (BST 580-649)
-    //   r 50+ (post-Gold)  → tier 4 (580-679, incl. unobtainable)
-    //   r 50+ mult ≥ 3     → tier 5 (BST 650+, incl. legendaries)
     const mult = difficultyMultiplier(round);
     let tier = 1;
     if (round >= 3) tier = 2;
@@ -687,14 +684,17 @@
     if (round > GOLD_ROUND) tier = 4;
     if (mult >= 3) tier = 5;
 
-    const slots = [1, 2, 3].map(() => {
+    // Team size scales with facility — Dome uses 2-Pokémon rosters.
+    const size = expectedTeamSize(facility);
+    const slots = [];
+    for (let i = 0; i < size; i++) {
       const id = pickFromPool(tier);
-      return {
+      slots.push({
         id,
         moves: pickMovesetFor(id),
         nature: simulateNatureFor(id),
-      };
-    });
+      });
+    }
 
     return {
       name,
@@ -1665,7 +1665,6 @@
   }
 
   // Count how many slots of the currently-selected preview team are filled.
-  // Used to enforce the Frontier rule of exactly 3 Pokémon per team.
   function currentPreviewTeamSize() {
     try {
       const pt = saved.previewTeams[saved.currentPreviewTeam];
@@ -1680,12 +1679,23 @@
     }
   }
 
-  function showTeamSizeError() {
+  // Expected team size per facility. Most Hoenn facilities use 3 Pokémon
+  // (Tour / Palais / Arène / Usine / Pic / Pyramide). Only the Dôme
+  // enforces 2 — single-elim tournament battles were 2v2 in Gen 3 Emerald
+  // (the player brings 3, picks 2 per tournament, but since we don't yet
+  // have a "pick 2 of 3" UI we just require a 2-Pokémon team).
+  function expectedTeamSize(facility) {
+    if (isDomeFacility(facility)) return 2;
+    return 3;
+  }
+
+  function showTeamSizeError(facility) {
     const lang = window.gameLang === "fr" ? "fr" : "en";
-    const title = lang === "fr" ? "Équipe trop grande" : "Team too large";
+    const expected = expectedTeamSize(facility);
+    const title = lang === "fr" ? "Taille d'équipe invalide" : "Invalid team size";
     const msg = lang === "fr"
-      ? "Les Facilities Secrètes suivent les règles Gen 3 : exactement 3 Pokémon par équipe. Retire les Pokémon supplémentaires via l'éditeur d'équipe avant de lancer un combat."
-      : "Secret Facilities use Gen 3 rules: exactly 3 Pokémon per team. Remove extras via the team editor before starting a fight.";
+      ? `Cette Facility suit les règles Gen 3 : exactement ${expected} Pokémon par équipe. Ajuste ton équipe via l'éditeur avant de lancer un combat.`
+      : `This facility uses Gen 3 rules: exactly ${expected} Pokémon per team. Adjust your team via the editor before starting a fight.`;
     const top = document.getElementById("tooltipTop");
     const titleEl = document.getElementById("tooltipTitle");
     const mid = document.getElementById("tooltipMid");
@@ -1708,11 +1718,10 @@
     const run = saved.frontierExt.activeRun;
     if (!run || run.facilityId !== facility.id) return;
 
-    // Frontier rule: teams of exactly 3 Pokémon. Refuse the launch if the
-    // player's preview team has anything other than 3.
+    // Facility-specific team size check (Dome = 2, others = 3).
     const teamSize = currentPreviewTeamSize();
-    if (teamSize !== 3) {
-      showTeamSizeError();
+    if (teamSize !== expectedTeamSize(facility)) {
+      showTeamSizeError(facility);
       return;
     }
 
@@ -1826,6 +1835,41 @@
     saved.frontierExt.streaks[run.facilityId] = 0;
   }
 
+  // Wrap exitCombat so that after any frontier-ext run battle ends, the
+  // player lands on the Battle Frontier tab (not the VS Trainers tab).
+  // explore.js:869 forces updateVS() for any area with `trainer: true`,
+  // which overrides the Frontier view set earlier at line 866 — we
+  // re-apply updateFrontier() after the original exit finishes.
+  function installExitRedirect() {
+    if (typeof window.exitCombat !== "function") {
+      setTimeout(installExitRedirect, 200);
+      return;
+    }
+    if (window.__frontierExtExitHooked) return;
+    window.__frontierExtExitHooked = true;
+    const orig = window.exitCombat;
+    window.exitCombat = function () {
+      const wasFrontierRun =
+        typeof saved !== "undefined" &&
+        saved &&
+        (saved.currentArea === RUN_AREA_ID ||
+          saved.lastAreaJoined === RUN_AREA_ID);
+      const res = orig.apply(this, arguments);
+      if (wasFrontierRun && typeof updateFrontier === "function") {
+        try {
+          updateFrontier();
+          // Also flip the vs-selector highlight to show Frontier is active
+          // (vanilla code does this via onclick — we replay the effect).
+          const selBtn = document.querySelector('#vs-selector div[onclick*="updateFrontier"]');
+          if (selBtn) selBtn.click();
+        } catch (e) {
+          console.error("[frontier-ext] frontier redirect failed:", e);
+        }
+      }
+      return res;
+    };
+  }
+
   // Wrap leaveCombat so we can detect which side won when it returns from
   // a frontier-ext run area. Installed once at bootstrap, retries until the
   // game's leaveCombat is defined.
@@ -1905,6 +1949,7 @@
     installInjection();
     installHelpTooltip();
     installCombatHook();
+    installExitRedirect();
     installPalaceMoveHook();
     installPalaceEnemyHook();
   }
