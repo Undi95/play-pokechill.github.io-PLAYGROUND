@@ -378,6 +378,22 @@
     };
   }
 
+  // True when the upcoming battle is the LAST battle of a non-boss
+  // round-set (battle 7/7 for Tower/Palace/Arena/Factory). Used by
+  // buildEphemeralRunArea to apply the mini-boss stat bump and by
+  // openSimulatedFight to surface a visible "mini-boss" label in the
+  // trainer preview. Centralised so the UI and the stat layer stay in
+  // sync — if we change the criteria in one place, we change both.
+  function isMiniBossBattle(run, facility) {
+    if (!run || !facility) return false;
+    if (isDomeFacility(facility) || isPikeFacility(facility) || isPyramidFacility(facility)) return false;
+    const perRound = battlesPerRound(facility);
+    if (perRound <= 1) return false;
+    const boss = getBossRoundInfo(run.round + 1, facility);
+    if (boss) return false;
+    return (run.battleInRound || 1) === perRound;
+  }
+
   // Shared tier-from-round calculator. Previously duplicated in
   // generateTrainer (1070) and generateFactoryRentalPool (4018). Consolidated
   // here so the BST pool used by trainers, rentals, brain fallback teams,
@@ -3560,12 +3576,25 @@
         : "";
       title.innerHTML = `${t.round} ${nextRound}${battleStr} — ${trainer.name}`;
     }
+    // Mini-boss tag: surface to the player that this last-of-round
+    // trainer is boosted (hidden ability + higher IV + extra HP pool)
+    // so they can anticipate a harder fight before committing.
+    const miniBoss = isMiniBossBattle(run, facility);
+    const miniBossLabel = miniBoss
+      ? (lang === "fr"
+          ? "⚡ Gardien de round — dresseur renforcé (stats maxées, talent caché)"
+          : "⚡ Round guardian — enhanced trainer (maxed stats, hidden ability)")
+      : "";
     if (mid) {
       mid.style.display = "block";
       const teamPreview = trainer.team
         .map((slot) => (typeof format === "function" ? format(slot.id) : slot.id))
         .join(" · ");
+      const miniBossBanner = miniBoss
+        ? `<div style="padding:0.3rem 0.8rem;color:#ffb347;font-weight:bold;font-size:0.92rem;text-shadow:0 0 4px rgba(255,140,0,0.4);">${miniBossLabel}</div>`
+        : "";
       mid.innerHTML = `
+        ${miniBossBanner}
         <div style="padding:0.5rem 0.8rem;">
           <div style="opacity:0.75;font-size:0.9rem;">${t.vs}</div>
           <div style="font-weight:bold;margin-top:0.2rem;">${teamPreview}</div>
@@ -6988,24 +7017,15 @@
     const diff = computeRunDifficulty(thisRound, facility);
 
     // "Mini-boss" bump: the LAST non-boss battle of a round-set (battle
-    // 7/7 of Tower/Palace/Arena/Factory non-boss rounds, floor 7 of a
-    // non-boss Pyramide) feels like a pre-fight warm-up unless we make
-    // it noticeably stronger than battles 1–6. Bumps:
+    // 7/7 of Tower/Palace/Arena/Factory non-boss rounds) feels like a
+    // pre-fight warm-up unless we make it noticeably stronger than
+    // battles 1–6. Bumps:
     //   • HP multiplier +2
     //   • IV rating +1 (capped at 6)
     //   • Ability always hidden (if defined)
-    // Skipped for actual boss rounds (brain appears there) and for
-    // facilities with their own structure (Dôme bracket / Pike doors).
-    const perRoundBattles = battlesPerRound(facility);
-    const isStandardMultiBattle = perRoundBattles > 1
-      && !isDomeFacility(facility)
-      && !isPikeFacility(facility);
-    const bossInfoThis = getBossRoundInfo(thisRound, facility);
-    const isLastBattleOfNonBossRound = run
-      && isStandardMultiBattle
-      && !bossInfoThis
-      && (run.battleInRound || 1) === perRoundBattles;
-    if (isLastBattleOfNonBossRound) {
+    // The UI surface label shown in openSimulatedFight uses the same
+    // `isMiniBossBattle` helper so preview + combat stay consistent.
+    if (isMiniBossBattle(run, facility)) {
       diff.hpMult = (diff.hpMult || 4) + 2;
       diff.ivRating = Math.min(6, (diff.ivRating || 0) + 1);
       diff.forceHiddenAbility = true;
