@@ -198,6 +198,31 @@
   const SILVER_ROUND = 7;
   const GOLD_ROUND = 49;
 
+  // ─── 2b. ACCESS GATE ──────────────────────────────────────────────────────
+  // All 7 secret facilities are locked until the player defeats Pokemon
+  // Professor Oak in VS. Matches the Shop / VS-trainer pattern
+  // (areas.vsXxx.defeated === true after the fight).
+  const UNLOCK_KEY = "vsPokemonProfessorOak";
+  // Reuse the existing GAME_UI key so FR/other-locale translation applies.
+  const UNLOCK_TEXT_KEY = "defeatPokemonProfessorOakToUnlock";
+  const UNLOCK_TEXT_FALLBACK = "Defeat Pokemon Professor Oak in VS to unlock";
+
+  function isUnlocked() {
+    try {
+      return !!(typeof areas !== "undefined" && areas[UNLOCK_KEY] && areas[UNLOCK_KEY].defeated);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function unlockText() {
+    if (typeof t_ui === "function") {
+      const t = t_ui(UNLOCK_TEXT_KEY);
+      if (t && t !== UNLOCK_TEXT_KEY) return t;
+    }
+    return UNLOCK_TEXT_FALLBACK;
+  }
+
   // ─── 3. SAVE STATE ────────────────────────────────────────────────────────
   // Namespaced under saved.frontierExt so we never collide with vanilla game.
   function ensureSaveSlot() {
@@ -300,6 +325,30 @@
         color: var(--light2, #fff);
         opacity: 0.9;
       }
+      /* Locked state — applied when the player hasn't beaten Pokemon
+         Professor Oak in VS yet. Same dim pattern as the shop's locked
+         categories (explore.js:1674). */
+      .frontier-ext-tile.locked {
+        filter: hue-rotate(var(--hue, 0deg)) brightness(0.35) grayscale(0.3);
+        cursor: not-allowed;
+      }
+      .frontier-ext-tile.locked img.frontier-ext-brain-icon {
+        filter: hue-rotate(calc(var(--hue, 0deg) * -1)) brightness(2.8) grayscale(-0.3);
+        /* counter-rotate to keep original sprite colours but slightly
+           re-brighten since the parent darkened everything. */
+      }
+      .frontier-ext-lock-icon {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 3rem;
+        height: 3rem;
+        color: #ffd700;
+        opacity: 0.9;
+        z-index: 5;
+        filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.8));
+      }
     `;
     const style = document.createElement("style");
     style.id = "frontier-ext-css";
@@ -322,16 +371,24 @@
     const silverClass = symbols.silver ? "silver" : "locked";
     const goldClass = symbols.gold ? "gold" : "locked";
 
+    const unlocked = isUnlocked();
+
     const tile = document.createElement("div");
-    tile.className = "explore-ticket frontier-ticket frontier-ext-tile";
+    tile.className = "explore-ticket frontier-ticket frontier-ext-tile" + (unlocked ? "" : " locked");
     tile.style.setProperty("--hue", facility.hueRotate + "deg");
     tile.dataset.facility = facility.id;
+
+    // Golden padlock overlay when locked.
+    const lockOverlay = unlocked
+      ? ""
+      : `<svg class="frontier-ext-lock-icon" xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5m0 2a3 3 0 0 1 3 3v3H9V7a3 3 0 0 1 3-3m0 11a2 2 0 0 1 1 3.7V20h-2v-1.3A2 2 0 0 1 12 15"/></svg>`;
 
     // Structure mirrors the vanilla Battle Tower / Battle Factory tile in
     // explore.js line ~7383+ : frontier-flair SVG as a direct child, then the
     // left label span, then the right-side sprite container.
     tile.innerHTML = `
       <span class="hitbox"></span>
+      ${lockOverlay}
       <div style="width: 100%;">
         ${facility.iconSvg}
         <span class="explore-ticket-left">
@@ -355,11 +412,35 @@
       </div>
     `;
 
-    // Right-click / long-press opens the help tooltip (data-help pattern).
+    // Right-click / long-press opens the help tooltip even when locked, so
+    // the player can still read what the facility will do once they unlock it.
     tile.dataset.help = "FrontierExt:" + facility.id;
-    // Left-click opens the preview / battle start.
-    tile.addEventListener("click", () => openFacilityPreview(facility));
+    // Left-click: preview / battle start if unlocked, else show the lock
+    // message using the same pattern as the shop's locked apricorn category
+    // (explore.js:1676-1681).
+    tile.addEventListener("click", () => {
+      if (!isUnlocked()) {
+        showLockedTooltip();
+        return;
+      }
+      openFacilityPreview(facility);
+    });
     return tile;
+  }
+
+  function showLockedTooltip() {
+    const top = document.getElementById("tooltipTop");
+    const title = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+    if (top) top.style.display = "none";
+    if (title) title.style.display = "none";
+    if (bottom) bottom.style.display = "none";
+    if (mid) {
+      mid.style.display = "block";
+      mid.innerHTML = unlockText();
+    }
+    if (typeof openTooltip === "function") openTooltip();
   }
 
   // ─── 6. PREVIEW MODAL (placeholder — will launch combat later) ────────────
