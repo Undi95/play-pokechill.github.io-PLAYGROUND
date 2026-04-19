@@ -1279,57 +1279,79 @@
     openDomePokemonSelection(facility); // re-render
   }
 
-  // IMPORTANT: the game represents "empty slot" as the key being ABSENT
-  // from the preview-team object (initialised as `saved.previewTeams.preview1
-  // = {}` in teams.js:4). Never write `null` into a slot — it corrupts the
-  // save and the team editor can't recover the slot afterwards. Use
-  // `delete pt.slotN` instead.
+  // GLOBAL SAFETY RULE: this overlay MUST NEVER mutate saved.previewTeams.
+  // Any write to saved.* that can persist to disk could corrupt the
+  // player's save if an error occurs mid-operation. The Dôme's 2-of-3
+  // rule is instead applied to the RUNTIME `team[]` object (populated by
+  // the game's injectPreviewTeam from currentTeam on each battle
+  // launch); team[] is ephemeral so clearing non-selected slots there
+  // has zero save-corruption risk.
+  //
+  // applyDomeSelection is now a marker — it only confirms the selection
+  // and lets the team-filter hook do the actual filtering at launch.
   function applyDomeSelection() {
-    const run = saved.frontierExt.activeRun;
-    if (!run || !Array.isArray(run.domeSelection)) return;
-    const pt = saved.previewTeams[saved.currentPreviewTeam];
-    if (!pt) return;
-    // Snapshot every slot (even absent ones are captured as undefined).
-    const backup = {};
-    for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
-      // `in` catches both "present but undefined" and real assignments.
-      if (sl in pt) backup[sl] = pt[sl];
-    }
-    run.domeTeamBackup = backup;
-    run.domeTeamSlot = saved.currentPreviewTeam;
-
-    // Capture the selected mons' data BEFORE any mutation.
-    const selectedData = run.domeSelection
-      .slice(0, DOME_ACTIVE_SIZE)
-      .map((srcSlot) => pt[srcSlot]);
-    // Wipe every slot by deleting the key (not nulling it).
-    for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
-      delete pt[sl];
-    }
-    // Place selected mons in slot1 / slot2.
-    selectedData.forEach((data, i) => {
-      if (data) pt["slot" + (i + 1)] = data;
-    });
+    const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
+    if (!run) return;
+    run.domeSelectionConfirmed = true;
   }
 
+  // Back-compat shim for earlier buggy saves that still carry a
+  // domeTeamBackup. If one is found, restore from it then clear so it
+  // never fires twice. New runs never populate this field anymore.
   function restoreDomeSelection() {
-    const run = saved.frontierExt && saved.frontierExt.activeRun;
+    const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
     if (!run || !run.domeTeamBackup) return;
     const ptKey = run.domeTeamSlot || saved.currentPreviewTeam;
     const pt = saved.previewTeams && saved.previewTeams[ptKey];
     if (pt) {
-      // Clear current state cleanly first (delete, not null).
       for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
         delete pt[sl];
       }
-      // Re-apply backup — only for slots that originally had data (the
-      // backup's own key presence mirrors the pre-mutation pt object).
       for (const sl of Object.keys(run.domeTeamBackup)) {
         pt[sl] = run.domeTeamBackup[sl];
       }
     }
     run.domeTeamBackup = null;
     run.domeTeamSlot = null;
+  }
+
+  // Hook injectPreviewTeam (teams.js:280) so that AFTER the game copies
+  // currentTeam → team[] at combat launch, we null out the RUNTIME team[]
+  // entries the player didn't pick for the Dôme match. saved.previewTeams
+  // stays untouched — zero corruption risk.
+  function installDomeTeamFilter() {
+    if (typeof window.injectPreviewTeam !== "function") {
+      setTimeout(installDomeTeamFilter, 200);
+      return;
+    }
+    if (window.__frontierExtDomeFilterHooked) return;
+    window.__frontierExtDomeFilterHooked = true;
+    const orig = window.injectPreviewTeam;
+    window.injectPreviewTeam = function () {
+      const res = orig.apply(this, arguments);
+      try {
+        const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
+        if (!run || !Array.isArray(run.domeSelection) ||
+            run.domeSelection.length !== DOME_ACTIVE_SIZE) return res;
+        const facility = FACILITIES.find((f) => f.id === run.facilityId);
+        if (!isDomeFacility(facility)) return res;
+        // Only filter when actually launching a Dôme-run battle
+        // (saved.currentArea is set to RUN_AREA_ID in injectPreviewTeam
+        // at line 448 via the buffer assignment).
+        if (saved.currentArea !== RUN_AREA_ID) return res;
+        if (typeof team === "undefined") return res;
+        const keep = new Set(run.domeSelection);
+        for (const slotKey of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
+          if (!keep.has(slotKey) && team[slotKey]) {
+            team[slotKey].pkmn = undefined;
+            team[slotKey].item = undefined;
+          }
+        }
+      } catch (e) {
+        console.error("[frontier-ext] dome team filter failed:", e);
+      }
+      return res;
+    };
   }
 
   // Heal any lingering corruption from earlier buggy saves. Walks every
@@ -2234,10 +2256,12 @@
         try {
           if (wasVictory) onRunVictory();
           else onRunDefeat();
-          // If this was a Dome match, restore the player's full 3-mon
-          // team (we only cleared slots 3+ for the 2v2 match).
+          // No more preview-team mutation to restore — the Dôme now
+          // filters team[] at runtime via installDomeTeamFilter, leaving
+          // saved.previewTeams untouched throughout the match.
+          // Legacy safety: if an older buggy save still has a backup,
+          // restoreDomeSelection() heals it. No-op otherwise.
           restoreDomeSelection();
-          // Clear Dome selection so next match picks fresh.
           const r = saved.frontierExt && saved.frontierExt.activeRun;
           if (r) r.domeSelection = [];
           // DO NOT delete areas[RUN_AREA_ID] here — the game calls
@@ -2300,6 +2324,7 @@
     installPalaceMoveHook();
     installPalaceEnemyHook();
     installTeamSanitizerHooks();
+    installDomeTeamFilter();
     // Attempt a corrupt-team recovery on boot. Safe if nothing to recover.
     try {
       ensureSaveSlot();
@@ -2361,6 +2386,7 @@
     openDomePokemonSelection,
     applyDomeSelection,
     restoreDomeSelection,
+    installDomeTeamFilter,
     recoverCorruptedDomeTeam,
     sanitizeNullSlots,
     DOME_BRACKET_SIZE,
