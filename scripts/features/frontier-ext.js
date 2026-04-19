@@ -1722,6 +1722,50 @@
         max-height: 80vh;
         overflow-y: auto;
       }
+      /* Swap modal sections — opponent (red tint) + yours (green tint). */
+      .frontier-ext-factory-swap-section {
+        margin: 0.35rem 0 0.6rem;
+      }
+      .frontier-ext-factory-swap-section .section-label {
+        padding: 0.3rem 0.8rem;
+        font-weight: bold;
+        font-size: 0.85rem;
+        letter-spacing: 0.04em;
+        margin: 0 0.6rem;
+        border-radius: 0.3rem 0.3rem 0 0;
+        text-transform: uppercase;
+      }
+      .frontier-ext-factory-swap-section .section-label.opponent {
+        background: linear-gradient(90deg, rgba(192, 57, 43, 0.35), rgba(140, 40, 30, 0.25));
+        color: #ffc8c0;
+        border-left: 3px solid #c0392b;
+      }
+      .frontier-ext-factory-swap-section .section-label.yours {
+        background: linear-gradient(90deg, rgba(106, 176, 76, 0.35), rgba(70, 130, 50, 0.25));
+        color: #caf0b8;
+        border-left: 3px solid #6ab04c;
+      }
+      /* Tint the cards so players see side-at-a-glance */
+      .frontier-ext-factory-card.swap-take {
+        border-color: rgba(192, 57, 43, 0.3);
+      }
+      .frontier-ext-factory-card.swap-take:hover {
+        border-color: rgba(192, 57, 43, 0.6);
+      }
+      .frontier-ext-factory-card.swap-take.selected {
+        border-color: #e74c3c;
+        background: linear-gradient(135deg, rgba(120, 40, 30, 0.55), rgba(70, 20, 15, 0.55));
+        box-shadow:
+          0 3px 10px rgba(0, 0, 0, 0.55),
+          0 0 14px rgba(231, 76, 60, 0.4),
+          inset 0 0 0 1px rgba(231, 76, 60, 0.25);
+      }
+      .frontier-ext-factory-card.swap-give {
+        border-color: rgba(106, 176, 76, 0.3);
+      }
+      .frontier-ext-factory-card.swap-give:hover {
+        border-color: rgba(106, 176, 76, 0.6);
+      }
       /* Inline actions row inside the rental modal — placed in tooltipMid
          instead of tooltipBottom so the 6-card grid can't hide it. */
       .frontier-ext-factory-actions {
@@ -3147,6 +3191,19 @@
       confirmFactorySelection(facility);
       return;
     }
+    // Factory-specific: post-battle swap modal actions.
+    if (action === "factory-swap-confirm") {
+      confirmFactorySwap(facility);
+      return;
+    }
+    if (action === "factory-swap-skip") {
+      if (run) {
+        run.pendingFactorySwap = null;
+        run.factorySwapSelection = [null, null];
+      }
+      openSimulatedFight(facility);
+      return;
+    }
     if (action === "abandon") {
       if (run) {
         const finalRound = run.round;
@@ -4222,6 +4279,194 @@
     // preview slot + tied-slot lock ensure the team-menu UI shows the
     // rentals and blocks edits. Player clicks "Save and Go" normally.
     launchCombat(facility);
+  }
+
+  // ── Factory swap modal ─────────────────────────────────────────────
+  // Shown after every mid-round Factory victory. Presents the defeated
+  // opponent's 3 rentals + the player's 3 current rentals. Player picks
+  // one from each side to trade, or skips. Click the Confirm button to
+  // apply the swap, or Skip to proceed without trading.
+  function openFactorySwapModal(facility) {
+    ensureSaveSlot();
+    const run = saved.frontierExt.activeRun;
+    if (!run) return;
+    if (!Array.isArray(run.pendingFactorySwap) || !Array.isArray(run.factoryTeam)) {
+      // Nothing to swap — just go straight to next battle preview.
+      openSimulatedFight(facility);
+      return;
+    }
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    setFactoryModalSizing(true);
+
+    if (!Array.isArray(run.factorySwapSelection)) run.factorySwapSelection = [null, null];
+    // [takeIdx, giveIdx] — idx into pendingFactorySwap and factoryTeam.
+
+    const t = lang === "fr"
+      ? {
+          title: "Échange post-combat",
+          subtitle: "Tu as vaincu ! Tu peux échanger un de tes Pokémon contre un de l'adversaire, ou passer.",
+          opponentTeam: "Adversaire vaincu",
+          yourTeam: "Ton équipe actuelle",
+          confirm: "🔄 Confirmer l'échange",
+          skip: "Passer — garder mon équipe",
+          pickBoth: "Choisis un Pokémon de chaque côté pour échanger.",
+        }
+      : {
+          title: "Post-battle swap",
+          subtitle: "You won! You may trade one of your Pokémon with one of your opponent's, or skip.",
+          opponentTeam: "Defeated opponent",
+          yourTeam: "Your current team",
+          confirm: "🔄 Confirm swap",
+          skip: "Skip — keep my team",
+          pickBoth: "Pick one Pokémon from each side to swap.",
+        };
+
+    const top = document.getElementById("tooltipTop");
+    const title = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+
+    if (top) top.style.display = "none";
+    if (title) {
+      title.style.display = "block";
+      title.innerHTML = `${lang === "fr" ? facility.nameFr : facility.nameEn} — ${t.title}`;
+    }
+
+    const renderCard = (rental, side, idx, isSelected) => {
+      const monName = typeof format === "function" ? format(rental.id) : rental.id;
+      const natureLabel = rental.nature
+        ? (typeof format === "function" ? format(rental.nature) : rental.nature)
+        : (lang === "fr" ? "Neutre" : "Neutral");
+      const abilityLabel = rental.ability
+        ? (typeof format === "function" ? format(rental.ability) : rental.ability)
+        : "—";
+      const typeColor = (ty) => (typeof returnTypeColor === "function") ? returnTypeColor(ty) : "#888";
+      const moves = (rental.moves || []).map((k) => {
+        const label = typeof format === "function" ? format(k) : k;
+        const mv = typeof move !== "undefined" ? move[k] : null;
+        const tCol = mv ? typeColor(mv.type) : "#888";
+        return `<span class="move" style="--move-type:${tCol}">${label}</span>`;
+      }).join("");
+      const iv = rental.ivs || {};
+      const ivTier = (v) => v <= 2 ? "low" : v <= 4 ? "mid" : "high";
+      const ivLabels = lang === "fr"
+        ? { hp: "PV", atk: "Atk", def: "Déf", satk: "AtS", sdef: "DéS", spe: "Vit" }
+        : { hp: "HP", atk: "Atk", def: "Def", satk: "SAtk", sdef: "SDef", spe: "Spe" };
+      const ivRow = (k) => {
+        const v = Math.max(0, Math.min(6, (iv[k] | 0)));
+        return `<div class="iv-row"><span class="iv-label">${ivLabels[k]}</span>
+          <div class="iv-bar"><div class="iv-bar-fill ${ivTier(v)}" style="width:${(v / 6) * 100}%"></div></div>
+          <span class="iv-value">${v}</span></div>`;
+      };
+      return `
+        <div class="frontier-ext-factory-card ${isSelected ? "selected" : ""} swap-${side}"
+             data-swap-side="${side}" data-swap-idx="${idx}">
+          <div class="card-header">
+            <img src="img/pkmn/sprite/${rental.id}.png" alt="${monName}" class="sprite">
+            <div class="title-block">
+              <div class="name">${monName}</div>
+              <div class="tags">
+                <span class="tag-nature">${natureLabel}</span>
+                <span class="tag-ability">${abilityLabel}</span>
+              </div>
+            </div>
+          </div>
+          <div class="ivs">
+            ${ivRow("hp")}${ivRow("atk")}${ivRow("def")}
+            ${ivRow("satk")}${ivRow("sdef")}${ivRow("spe")}
+          </div>
+          <div class="moves">${moves}</div>
+        </div>
+      `;
+    };
+
+    const [takeIdx, giveIdx] = run.factorySwapSelection;
+    const opponentGrid = run.pendingFactorySwap.map((r, i) =>
+      renderCard(r, "take", i, takeIdx === i)).join("");
+    const yourGrid = run.factoryTeam.map((r, i) =>
+      renderCard(r, "give", i, giveIdx === i)).join("");
+
+    const canConfirm = takeIdx !== null && giveIdx !== null;
+
+    if (mid) {
+      mid.style.display = "block";
+      mid.innerHTML = `
+        <div class="frontier-ext-factory-subtitle">${t.subtitle}</div>
+        <div class="frontier-ext-factory-swap-section">
+          <div class="section-label opponent">${t.opponentTeam}</div>
+          <div class="frontier-ext-factory-grid">${opponentGrid}</div>
+        </div>
+        <div class="frontier-ext-factory-swap-section">
+          <div class="section-label yours">${t.yourTeam}</div>
+          <div class="frontier-ext-factory-grid">${yourGrid}</div>
+        </div>
+        <div class="frontier-ext-factory-counter">${canConfirm ? "✓" : t.pickBoth}</div>
+        <div class="frontier-ext-factory-actions">
+          <button class="frontier-ext-action-btn primary ${canConfirm ? "" : "disabled"}" data-action="factory-swap-confirm">${t.confirm}</button>
+          <button class="frontier-ext-action-btn" data-action="factory-swap-skip">${t.skip}</button>
+        </div>
+      `;
+      mid.querySelectorAll(".frontier-ext-factory-card").forEach((el) => {
+        el.addEventListener("click", () => {
+          const side = el.dataset.swapSide;
+          const idx = parseInt(el.dataset.swapIdx, 10);
+          if (side === "take") run.factorySwapSelection[0] = idx;
+          else run.factorySwapSelection[1] = idx;
+          openFactorySwapModal(facility); // re-render
+        });
+      });
+      mid.querySelectorAll("[data-action]").forEach((btn) => {
+        btn.onclick = () => {
+          if (btn.classList.contains("disabled")) return;
+          handleRunAction(btn.dataset.action, facility);
+        };
+      });
+    }
+    if (bottom) { bottom.style.display = "none"; bottom.innerHTML = ""; }
+    if (typeof openTooltip === "function") openTooltip();
+  }
+
+  // Execute the chosen swap: restore the outgoing rental's original pkmn
+  // state, insert the incoming rental into factoryTeam (same slot), apply
+  // its spec so the next combat picks up the new moves/nature/ivs/ability.
+  function confirmFactorySwap(facility) {
+    const run = saved.frontierExt.activeRun;
+    if (!run || !Array.isArray(run.pendingFactorySwap)) return;
+    const [takeIdx, giveIdx] = run.factorySwapSelection || [null, null];
+    if (takeIdx === null || giveIdx === null) return;
+    const incoming = run.pendingFactorySwap[takeIdx];
+    const outgoing = run.factoryTeam[giveIdx];
+    if (!incoming || !outgoing) return;
+
+    // Restore the OUTGOING rental's original pkmn state (we no longer
+    // need it overridden; keep the user's data clean for the species).
+    if (run.factoryOriginalState && run.factoryOriginalState[outgoing.id]
+        && typeof pkmn !== "undefined" && pkmn[outgoing.id]) {
+      const orig = run.factoryOriginalState[outgoing.id];
+      pkmn[outgoing.id].moves = orig.moves;
+      pkmn[outgoing.id].nature = orig.nature;
+      pkmn[outgoing.id].ivs = orig.ivs;
+      pkmn[outgoing.id].ability = orig.ability;
+      delete run.factoryOriginalState[outgoing.id];
+    }
+
+    // Replace in factoryTeam and in the private previewTeam slot so the
+    // combat engine sees the new species on next launch.
+    run.factoryTeam[giveIdx] = incoming;
+    const pt = saved.previewTeams && saved.previewTeams[FACTORY_PREVIEW_SLOT];
+    if (pt) pt["slot" + (giveIdx + 1)] = { pkmn: incoming.id, item: undefined };
+
+    // Apply the new rental's full spec (moves + nature + IVs + ability)
+    // to pkmn[id], backing up the incoming species' original state so
+    // we can restore it at run-end.
+    applyFactoryMoves(run);
+
+    // Clear swap state + reset selection.
+    run.pendingFactorySwap = null;
+    run.factorySwapSelection = [null, null];
+
+    // Move on to the next battle preview.
+    openSimulatedFight(facility);
   }
 
   // ─── 6b2c. PYRAMID RULE — 7-floor grid nav, hidden encounters ─────────────
@@ -6267,6 +6512,23 @@
     // round-advance + boss + round-cleared modal.
     const perRound = battlesPerRound(facility);
     if (perRound > 1 && !isPikeFacility(facility) && !isDomeFacility(facility) && !isPyramidFacility(facility)) {
+      // Factory canonical swap rule: after every battle except the last
+      // of a round, the player may trade one of their 3 rentals with one
+      // of the defeated opponent's 3. Stash the opponent's team HERE,
+      // before upcomingTrainer is nulled out, so the swap modal can
+      // render the candidates. Fresh IVs + ability are rolled per
+      // candidate so the swapped-in mon is a full rental spec.
+      if (isFactoryFacility(facility)
+          && run.upcomingTrainer
+          && (run.battleInRound || 1) < perRound) {
+        run.pendingFactorySwap = (run.upcomingTrainer.team || []).map((r) => ({
+          id: r.id,
+          moves: r.moves || pickMovesetFor(r.id),
+          nature: r.nature || simulateNatureFor(r.id) || "",
+          ivs: rollFactoryIvs(),
+          ability: rollFactoryAbility(r.id),
+        }));
+      }
       run.battleInRound = (run.battleInRound || 1) + 1;
       if (run.battleInRound <= perRound) {
         run.upcomingTrainer = null;
@@ -6441,8 +6703,10 @@
               return;
             }
 
-            // 4. Tour / Palais / Arène / Usine — auto-open the simulated-
-            //    fight preview for the next battle of the same round.
+            // 4. Tour / Palais / Arène / Usine — auto-open the next-step
+            //    screen. Factory first shows the post-battle swap modal
+            //    (when a swap is pending); other facilities go straight
+            //    to the simulated-fight preview for the next battle.
             //    battleInRound has been incremented to the *next* battle
             //    in onRunVictory (stays <= perRound until round cleared).
             const perRound = battlesPerRound(fac);
@@ -6452,6 +6716,13 @@
                 && !isPyramidFacility(fac)
                 && (laterRun.battleInRound || 1) > 1
                 && (laterRun.battleInRound || 1) <= perRound) {
+              // Factory post-battle swap offer — renders instead of the
+              // simulated fight preview. On skip / confirm the swap
+              // handlers themselves open the fight preview.
+              if (isFactoryFacility(fac) && Array.isArray(laterRun.pendingFactorySwap)) {
+                openFactorySwapModal(fac);
+                return;
+              }
               openSimulatedFight(fac);
               return;
             }
@@ -6663,6 +6934,8 @@
     openFactoryRentalSelection,
     toggleFactorySelection,
     confirmFactorySelection,
+    openFactorySwapModal,
+    confirmFactorySwap,
     applyFactoryMoves,
     restoreFactoryMoves,
     enterFactoryPreviewSlot,
