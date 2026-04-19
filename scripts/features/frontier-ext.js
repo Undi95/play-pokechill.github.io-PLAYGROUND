@@ -3882,6 +3882,19 @@
       openFacilityPreview(facility);
       return;
     }
+    // "Rest" between rounds — close the cleared-round modal without
+    // touching activeRun. The run stays alive with roundJustCleared=true
+    // so the facility tile's tooltip still shows "Continue (Round N+1)"
+    // whenever the player comes back. Team stays unlocked in the
+    // meantime. If they truly want to abandon, the in-progress tooltip
+    // on the tile offers that action explicitly.
+    if (action === "rest") {
+      if (typeof closeTooltip === "function") closeTooltip();
+      // Refresh the frontier listing so the tile re-renders with the
+      // in-progress badge + heat sticker if applicable.
+      if (typeof updateFrontier === "function") updateFrontier();
+      return;
+    }
     if (action === "launch") {
       // Team-size check happens HERE for both Dôme and non-Dôme so the
       // error path never leaves the team in a mutated state. Dôme needs
@@ -6323,8 +6336,9 @@
           gold: "💎 Le Cerveau de la Frontière (Or) t'attend !",
           rematch: "🔥 Revanche du Cerveau ×" + (bossInfo && bossInfo.multiplier),
           continue: "Continuer — Round " + nextRound,
+          rest: "Repos",
           abandon: "Abandonner",
-          hint: "Sauvegarde automatique. Continuer enchaîne sur le round suivant, Abandonner met fin à la série. Entre rounds ton équipe est déverrouillée — tu peux l'éditer avant de continuer.",
+          hint: "Sauvegarde automatique. Continuer enchaîne sur le round suivant. Repos ferme ce menu sans casser la série — ton équipe est déverrouillée, tu peux l'éditer et revenir plus tard via la tuile. Abandonner met fin à la série.",
           silverAwarded: "🏆 Symbole Argent débloqué !",
           goldAwarded: "🏆 Symbole Or débloqué !",
         }
@@ -6340,8 +6354,9 @@
           gold: "💎 The Frontier Brain (Gold) is next!",
           rematch: "🔥 Brain rematch ×" + (bossInfo && bossInfo.multiplier),
           continue: "Continue — Round " + nextRound,
+          rest: "Rest",
           abandon: "Abandon",
-          hint: "Auto-saved. Continue moves on to the next round, Abandon ends the streak. Between rounds your team unlocks — edit it before continuing.",
+          hint: "Auto-saved. Continue moves on to the next round. Rest closes this menu without breaking the streak — team unlocked, come back via the tile anytime. Abandon ends the streak.",
           silverAwarded: "🏆 Silver Symbol unlocked!",
           goldAwarded: "🏆 Gold Symbol unlocked!",
         };
@@ -6405,9 +6420,17 @@
       // Hostess-style flow à la Gen 3 Battle Tower: two-button choice
       // between continuing the streak and abandoning. The game auto-saves
       // in the background so no separate "Save" option is needed.
+      // Three-button layout — ordered left-to-right by intent strength:
+      //   • Continue  (primary / green)  — straight into next round
+      //   • Rest      (neutral / black)  — pause without killing streak
+      //   • Abandon   (danger / red)     — truly end the streak
+      // Rest keeps activeRun alive with roundJustCleared=true so the tile
+      // tooltip still shows the "Continue (Round N+1)" resume button
+      // whenever the player comes back later.
       bottom.innerHTML = `
         <div class="frontier-ext-run-actions">
           <button class="frontier-ext-action-btn primary" data-action="round-continue">${t.continue}</button>
+          <button class="frontier-ext-action-btn" data-action="rest">${t.rest}</button>
           <button class="frontier-ext-action-btn danger" data-action="abandon">${t.abandon}</button>
         </div>
         <div class="frontier-ext-round-hint">${t.hint}</div>
