@@ -1380,12 +1380,15 @@
       }
       /* ── Factory rental selection grid ───────────────────────────────── */
       .frontier-ext-factory-subtitle {
-        padding: 0.4rem 0.9rem 0.2rem;
+        padding: 0.55rem 1rem 0.35rem;
         text-align: center;
         font-style: italic;
-        opacity: 0.85;
-        font-size: 0.88rem;
-        color: var(--dark1, #2a1a0a);
+        font-size: 0.9rem;
+        color: #e9d4a8;
+        background: rgba(255, 230, 180, 0.06);
+        border-radius: 0.3rem;
+        margin: 0 0.6rem 0.3rem;
+        border: 1px solid rgba(255, 230, 180, 0.12);
       }
       .frontier-ext-factory-grid {
         display: grid;
@@ -1397,128 +1400,164 @@
       }
       .frontier-ext-factory-card {
         position: relative;
-        background: rgba(0, 0, 0, 0.3);
-        border: 2px solid transparent;
-        border-radius: 0.4rem;
-        padding: 0.45rem 0.55rem 0.55rem;
+        background: linear-gradient(135deg, rgba(30, 18, 8, 0.85), rgba(18, 10, 5, 0.65));
+        border: 2px solid rgba(255, 230, 180, 0.12);
+        border-radius: 0.55rem;
+        padding: 0.6rem 0.7rem 0.65rem;
         cursor: pointer;
-        transition: transform 0.12s, border-color 0.15s, background 0.15s;
+        transition: transform 0.12s ease-out, border-color 0.15s, box-shadow 0.15s, background 0.15s;
         user-select: none;
         color: #f5e6c8;
-        /* Two-zone card: sprite + identity on the left, IVs/moves on
-           the right. Much more readable at 2-col grid width. */
-        display: grid;
-        grid-template-columns: 5rem 1fr;
-        gap: 0.55rem;
-        align-items: center;
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
       }
       .frontier-ext-factory-card:hover {
         transform: translateY(-2px);
-        border-color: rgba(255, 255, 255, 0.35);
-        background: rgba(0, 0, 0, 0.45);
+        border-color: rgba(255, 230, 180, 0.3);
+        background: linear-gradient(135deg, rgba(50, 30, 15, 0.9), rgba(30, 18, 8, 0.7));
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.55);
       }
       .frontier-ext-factory-card.selected {
         border-color: #6ab04c;
-        background: rgba(106, 176, 76, 0.25);
+        background: linear-gradient(135deg, rgba(50, 80, 40, 0.55), rgba(20, 40, 18, 0.55));
+        box-shadow:
+          0 3px 10px rgba(0, 0, 0, 0.55),
+          0 0 14px rgba(106, 176, 76, 0.4),
+          inset 0 0 0 1px rgba(106, 176, 76, 0.25);
       }
-      .frontier-ext-factory-card .card-left {
+      /* Card header: sprite + title block + pick badge */
+      .frontier-ext-factory-card .card-header {
         display: flex;
-        flex-direction: column;
         align-items: center;
-        gap: 0.1rem;
-      }
-      .frontier-ext-factory-card .card-right {
-        display: flex;
-        flex-direction: column;
-        gap: 0.3rem;
-        min-width: 0;
+        gap: 0.55rem;
+        padding-bottom: 0.35rem;
+        border-bottom: 1px solid rgba(255, 230, 180, 0.12);
       }
       .frontier-ext-factory-card .sprite {
-        width: 4.2rem;
-        height: 4.2rem;
+        width: 3.6rem;
+        height: 3.6rem;
+        flex-shrink: 0;
         image-rendering: pixelated;
-        display: block;
+      }
+      .frontier-ext-factory-card .title-block {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
       }
       .frontier-ext-factory-card .name {
         font-weight: bold;
-        font-size: 0.88rem;
-        margin-top: 0.1rem;
-        text-align: center;
+        font-size: 1.02rem;
+        color: #ffeec9;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 5rem;
+        line-height: 1.1;
       }
-      .frontier-ext-factory-card .nature {
+      .frontier-ext-factory-card .tags {
+        display: flex;
+        gap: 0.3rem;
+        flex-wrap: wrap;
+      }
+      .frontier-ext-factory-card .tag-nature {
+        background: rgba(130, 180, 90, 0.22);
+        color: #cfe9a0;
+        padding: 0.08rem 0.45rem;
+        border-radius: 0.25rem;
         font-size: 0.72rem;
-        opacity: 0.85;
         font-style: italic;
-        text-align: center;
+        border: 1px solid rgba(130, 180, 90, 0.3);
       }
-      .frontier-ext-factory-card .ability {
-        font-size: 0.72rem;
+      .frontier-ext-factory-card .tag-ability {
+        background: rgba(255, 200, 90, 0.18);
         color: #ffd17a;
+        padding: 0.08rem 0.45rem;
+        border-radius: 0.25rem;
+        font-size: 0.72rem;
         font-weight: bold;
-        text-align: center;
+        border: 1px solid rgba(255, 200, 90, 0.3);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 5rem;
+        max-width: 8rem;
       }
+      /* IV bar grid */
       .frontier-ext-factory-card .ivs {
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.1rem 0.4rem;
-        font-size: 0.72rem;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.22rem 0.55rem;
       }
-      .frontier-ext-factory-card .ivs .iv-row {
+      .frontier-ext-factory-card .iv-row {
         display: flex;
-        justify-content: space-between;
         align-items: center;
         gap: 0.3rem;
+        font-size: 0.7rem;
       }
-      .frontier-ext-factory-card .ivs .iv-row .k {
-        opacity: 0.7;
+      .frontier-ext-factory-card .iv-label {
+        min-width: 1.7rem;
         font-weight: bold;
-        min-width: 1.8rem;
-      }
-      .frontier-ext-factory-card .ivs .iv-row .v {
-        color: #ffd700;
+        opacity: 0.7;
         letter-spacing: 0.02em;
-        font-size: 0.72rem;
-        line-height: 1;
       }
+      .frontier-ext-factory-card .iv-bar {
+        flex: 1;
+        height: 0.4rem;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 0.2rem;
+        overflow: hidden;
+        border: 1px solid rgba(0, 0, 0, 0.25);
+      }
+      .frontier-ext-factory-card .iv-bar-fill {
+        height: 100%;
+        border-radius: inherit;
+        transition: width 0.2s;
+      }
+      .frontier-ext-factory-card .iv-bar-fill.low  { background: linear-gradient(90deg, #c0392b, #e57070); }
+      .frontier-ext-factory-card .iv-bar-fill.mid  { background: linear-gradient(90deg, #d89040, #f1c868); }
+      .frontier-ext-factory-card .iv-bar-fill.high { background: linear-gradient(90deg, #4ac060, #7ae090); }
+      .frontier-ext-factory-card .iv-value {
+        font-weight: bold;
+        color: #ffe080;
+        font-size: 0.72rem;
+        min-width: 0.8rem;
+        text-align: right;
+      }
+      /* Move chips — type-coloured left border */
       .frontier-ext-factory-card .moves {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 0.18rem;
+        gap: 0.28rem;
       }
       .frontier-ext-factory-card .moves .move {
-        font-size: 0.72rem;
-        background: rgba(255, 255, 255, 0.08);
-        padding: 0.12rem 0.4rem;
-        border-radius: 0.2rem;
+        font-size: 0.74rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        background: rgba(255, 255, 255, 0.06);
+        border-left: 4px solid var(--move-type, #888);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        text-align: center;
+        color: #f0e4c6;
+        font-weight: 500;
       }
+      /* Selection badge — round green pill at header's right edge */
       .frontier-ext-factory-card .pick-badge {
-        position: absolute;
-        top: -0.4rem;
-        right: -0.4rem;
-        width: 1.4rem;
-        height: 1.4rem;
+        width: 1.6rem;
+        height: 1.6rem;
         background: #6ab04c;
         border: 2px solid #2a1a0a;
         border-radius: 50%;
         color: white;
         font-weight: bold;
-        font-size: 0.85rem;
+        font-size: 0.95rem;
         display: flex;
         align-items: center;
         justify-content: center;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        flex-shrink: 0;
       }
       .frontier-ext-factory-counter {
         text-align: center;
@@ -4008,45 +4047,63 @@
       const ivLabels = lang === "fr"
         ? { hp: "PV", atk: "Atk", def: "Déf", satk: "AtS", sdef: "DéS", spe: "Vit" }
         : { hp: "HP", atk: "Atk", def: "Def", satk: "SAtk", sdef: "SDef", spe: "Spe" };
-      const ivStar = (n) => {
-        const v = Math.max(0, Math.min(6, n | 0));
-        return "★".repeat(v) + "☆".repeat(6 - v);
-      };
       const neutralLabel = lang === "fr" ? "Neutre" : "Neutral";
+      const ivTier = (v) => v <= 2 ? "low" : v <= 4 ? "mid" : "high";
+      // Pokechill ships a global returnTypeColor(type) helper — used
+      // to accent each move chip with its type colour.
+      const typeColor = (t) => (typeof returnTypeColor === "function")
+        ? returnTypeColor(t) : "#888";
+
       const cards = run.factoryPool.map((rental, idx) => {
         const selected = run.factorySelection.indexOf(idx) !== -1;
+        const pickPos = run.factorySelection.indexOf(idx);
         const monName = typeof format === "function" ? format(rental.id) : rental.id;
-        const movesList = rental.moves.map((k) => {
-          const label = typeof format === "function" ? format(k) : k;
-          return `<span class="move">${label}</span>`;
-        }).join("");
         const natureLabel = rental.nature
           ? (typeof format === "function" ? format(rental.nature) : rental.nature)
           : neutralLabel;
         const abilityLabel = rental.ability
           ? (typeof format === "function" ? format(rental.ability) : rental.ability)
           : "—";
+
         const iv = rental.ivs || {};
-        const ivRow = (k) =>
-          `<div class="iv-row"><span class="k">${ivLabels[k]}</span><span class="v">${ivStar(iv[k])}</span></div>`;
+        const ivRow = (k) => {
+          const v = Math.max(0, Math.min(6, (iv[k] | 0)));
+          const pct = (v / 6) * 100;
+          return `
+            <div class="iv-row">
+              <span class="iv-label">${ivLabels[k]}</span>
+              <div class="iv-bar"><div class="iv-bar-fill ${ivTier(v)}" style="width:${pct}%"></div></div>
+              <span class="iv-value">${v}</span>
+            </div>`;
+        };
         const ivsBlock = `
           <div class="ivs">
             ${ivRow("hp")}${ivRow("atk")}${ivRow("def")}
             ${ivRow("satk")}${ivRow("sdef")}${ivRow("spe")}
           </div>`;
+
+        const movesList = rental.moves.map((k) => {
+          const label = typeof format === "function" ? format(k) : k;
+          const mv = typeof move !== "undefined" ? move[k] : null;
+          const tCol = mv ? typeColor(mv.type) : "#888";
+          return `<span class="move" style="--move-type:${tCol}">${label}</span>`;
+        }).join("");
+
         return `
           <div class="frontier-ext-factory-card ${selected ? "selected" : ""}" data-idx="${idx}">
-            <div class="card-left">
+            <div class="card-header">
               <img src="img/pkmn/sprite/${rental.id}.png" alt="${monName}" class="sprite">
-              <div class="name">${monName}</div>
-              <div class="nature">${natureLabel}</div>
-              <div class="ability">${abilityLabel}</div>
+              <div class="title-block">
+                <div class="name">${monName}</div>
+                <div class="tags">
+                  <span class="tag-nature">${natureLabel}</span>
+                  <span class="tag-ability">${abilityLabel}</span>
+                </div>
+              </div>
+              ${selected ? `<div class="pick-badge">${pickPos + 1}</div>` : ""}
             </div>
-            <div class="card-right">
-              ${ivsBlock}
-              <div class="moves">${movesList}</div>
-            </div>
-            ${selected ? `<div class="pick-badge">${run.factorySelection.indexOf(idx) + 1}</div>` : ""}
+            ${ivsBlock}
+            <div class="moves">${movesList}</div>
           </div>
         `;
       }).join("");
