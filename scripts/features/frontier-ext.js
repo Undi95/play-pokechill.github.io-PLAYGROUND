@@ -1580,6 +1580,38 @@
         max-height: 80vh;
         overflow-y: auto;
       }
+      /* EXCEPTIONAL for this modal only: reposition the vanilla close
+         button to top-right and shrink it. The default close sits at
+         mid-center which overlaps the Confirm / Abandon action row.
+         Uses :has() for modern browsers AND a direct class selector on
+         #tooltipBackground for older browser compat. */
+      #tooltipBackground.frontier-ext-factory-open #tooltipClose,
+      #tooltipBackground:has(#tooltipBox.frontier-ext-factory-open) #tooltipClose {
+        position: absolute !important;
+        top: 0.6rem !important;
+        right: 0.6rem !important;
+        bottom: auto !important;
+        left: auto !important;
+        transform: none !important;
+        width: 1.8rem !important;
+        height: 1.8rem !important;
+        min-width: 0 !important;
+        min-height: 0 !important;
+        font-size: 0.95rem !important;
+        line-height: 1.8rem !important;
+        padding: 0 !important;
+        border-radius: 50% !important;
+        background: rgba(0, 0, 0, 0.6) !important;
+        color: #f5e6c8 !important;
+        border: 1px solid rgba(255, 230, 180, 0.3) !important;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5) !important;
+        z-index: 10 !important;
+      }
+      #tooltipBackground.frontier-ext-factory-open #tooltipClose:hover,
+      #tooltipBackground:has(#tooltipBox.frontier-ext-factory-open) #tooltipClose:hover {
+        background: rgba(192, 57, 43, 0.85) !important;
+        border-color: rgba(255, 180, 180, 0.5) !important;
+      }
       /* ── Battle Pyramid — dungeon map ──────────────────────────────── */
       .frontier-ext-pyr-grid {
         display: grid;
@@ -3986,15 +4018,22 @@
     }
   }
 
-  // Add / remove the "factory modal open" class on #tooltipBox so the
-  // modal gets an enlarged viewport that fits the 6-card grid + counter
-  // + action buttons without needing to scroll. The class is cleared
-  // every time we navigate away from the rental screen.
+  // Add / remove the "factory modal open" class on #tooltipBox AND its
+  // parent #tooltipBackground so the modal gets an enlarged viewport
+  // AND the vanilla close button can be restyled (top-right small pill
+  // instead of the default mid-center button that overlaps the action
+  // row). Class cleared every time we navigate away from the rental
+  // screen.
   function setFactoryModalSizing(on) {
     const box = document.getElementById("tooltipBox");
-    if (!box) return;
-    if (on) box.classList.add("frontier-ext-factory-open");
-    else box.classList.remove("frontier-ext-factory-open");
+    const bg = document.getElementById("tooltipBackground");
+    if (on) {
+      if (box) box.classList.add("frontier-ext-factory-open");
+      if (bg)  bg.classList.add("frontier-ext-factory-open");
+    } else {
+      if (box) box.classList.remove("frontier-ext-factory-open");
+      if (bg)  bg.classList.remove("frontier-ext-factory-open");
+    }
   }
 
   // ── UI: Rental selection modal ─────────────────────────────────────────
