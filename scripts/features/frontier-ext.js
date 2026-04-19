@@ -1058,6 +1058,117 @@
     }
   }
 
+  // ─── 6b1. PALACE RULE — auto-move by nature (ÉTAPE 3) ────────────────────
+  // Pokechill is an auto-battler: each Pokémon cycles slot1→2→3→4→1 via
+  // `team[active].turn++` (explore.js:2412). The Palace overrides that
+  // sequential cycle with a weighted random pick based on the Pokémon's
+  // nature, matching the Gen 3 Battle Palace rule where moves are auto-
+  // selected from 3 "style" buckets (ATK / DEF / SUP) per nature.
+  //
+  // The 7 Pokechill natures (from i18n engine.js:420+):
+  //   adamant, modest, jolly, relaxed, quiet, bold, (empty/neutral)
+  //
+  // Style weights sum to 100 per nature:
+  const NATURE_STYLE_WEIGHTS = {
+    adamant: [70, 10, 20], // raw offense, Atk ▲ S.Atk ▼
+    modest:  [70, 10, 20], // raw offense, S.Atk ▲ Atk ▼
+    jolly:   [40, 30, 30], // speedster, erratic
+    relaxed: [30, 50, 20], // tanky, HP ▲ Spe ▼ — patient, defensive
+    quiet:   [20, 40, 40], // HP ▲ Atk ▼ S.Atk ▼ — support-leaning
+    bold:    [15, 60, 25], // Def ▲ S.Def ▲ HP ▼ — defensive specialist
+    "":      [40, 30, 30], // neutral / no nature
+    none:    [40, 30, 30],
+  };
+
+  // Heuristic classifier: move with power > 0 is ATK; otherwise name-match
+  // against known SUP / DEF patterns. Good enough for the Palace rule
+  // without introspecting move.hitEffect function bodies.
+  const SUP_PATTERNS = /bulk|amnesia|calm|swords|nasty|rest|recover|substitute|protect|detect|aquaRing|ironDefense|cosmic|growth|curse|barrier|harden|sharpen|reflect|lightScreen|safeguard|wish|synthesis|morning|moonlight|roost|agility|tailwind|helpingHand|coil|dragonDance|quiverDance|shellSmash|shiftGear|workUp|rockPolish|defog|hazeClear|doubleTeam|minimize|withdraw|stockpile|ingrain|leechSeed|gigaDrain/i;
+  const DEF_PATTERNS = /leer|growl|willO|thunder.*[Ww]ave|sleep|toxic|poisonPowder|stunSpore|spore|confuse|hypno|charm|screech|metalSound|sweetKiss|babyDoll|glare|attract|disable|taunt|torment|encore|yawn|embargo|worryS|knockOff|trick|switcheroo|memento/i;
+
+  function classifyMoveId(moveId) {
+    if (!moveId) return null;
+    const m = typeof move !== "undefined" ? move[moveId] : null;
+    if (!m) return "SUP"; // unknown → treat as SUP
+    if (m.power && m.power > 0) return "ATK";
+    if (SUP_PATTERNS.test(moveId)) return "SUP";
+    if (DEF_PATTERNS.test(moveId)) return "DEF";
+    return "DEF"; // default for status moves we can't classify
+  }
+
+  function pickSlotByNature(member) {
+    if (!member || !member.pkmn || typeof pkmn === "undefined") return null;
+    const pk = pkmn[member.pkmn.id];
+    if (!pk || !pk.moves) return null;
+
+    const nature = (pk.nature || "").toLowerCase();
+    const weights = NATURE_STYLE_WEIGHTS[nature] || NATURE_STYLE_WEIGHTS.none;
+
+    // Build list of [slotNumber, moveId, style] for slots that have a move
+    const slots = [];
+    for (let i = 1; i <= 4; i++) {
+      const mv = pk.moves["slot" + i];
+      if (!mv) continue;
+      slots.push({ slot: i, moveId: mv, style: classifyMoveId(mv) });
+    }
+    if (slots.length === 0) return 1;
+
+    const byStyle = { ATK: [], DEF: [], SUP: [] };
+    slots.forEach((s) => byStyle[s.style].push(s.slot));
+
+    // Weighted style pick
+    const roll = Math.random() * (weights[0] + weights[1] + weights[2]);
+    let targetStyle = "ATK";
+    if (roll >= weights[0]) targetStyle = "DEF";
+    if (roll >= weights[0] + weights[1]) targetStyle = "SUP";
+
+    // Fall back: if Pokémon has no move of target style, pick any available
+    const candidates = byStyle[targetStyle].length ? byStyle[targetStyle] : slots.map((s) => s.slot);
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
+  function isInPalaceRun() {
+    if (typeof saved !== "object" || !saved) return false;
+    if (!saved.frontierExt || !saved.frontierExt.activeRun) return false;
+    if (saved.currentArea !== RUN_AREA_ID) return false;
+    const facility = FACILITIES.find((f) => f.id === saved.frontierExt.activeRun.facilityId);
+    return !!(facility && facility.rules && facility.rules.autoMoveByNature);
+  }
+
+  // Wrap exploreCombatPlayer to re-pick the next move slot (by nature)
+  // every time the game naturally advances `team[active].turn`. This keeps
+  // the bar/timer logic of the original intact — we only overwrite the
+  // *target slot* for the next move charge.
+  function installPalaceMoveHook() {
+    if (typeof window.exploreCombatPlayer !== "function") {
+      setTimeout(installPalaceMoveHook, 200);
+      return;
+    }
+    if (window.__palaceHookInstalled) return;
+    window.__palaceHookInstalled = true;
+    const orig = window.exploreCombatPlayer;
+    window.exploreCombatPlayer = function () {
+      let prevTurn = null;
+      let active = null;
+      if (isInPalaceRun() && typeof exploreActiveMember !== "undefined") {
+        active = team[exploreActiveMember];
+        if (active) prevTurn = active.turn;
+      }
+      const res = orig.apply(this, arguments);
+      if (active) {
+        const newTurn = active.turn;
+        if (newTurn !== prevTurn && newTurn !== null && newTurn !== undefined) {
+          // The original just advanced the turn — overwrite with our pick.
+          const picked = pickSlotByNature(active);
+          if (picked !== null && picked >= 1 && picked <= 4) {
+            active.turn = picked;
+          }
+        }
+      }
+      return res;
+    };
+  }
+
   // ─── 6c. REAL COMBAT LAUNCH (ÉTAPE 2) ─────────────────────────────────────
   // Ephemeral area id used throughout. Always reassigned before each fight.
   const RUN_AREA_ID = "frontierExtRun";
@@ -1311,6 +1422,7 @@
     installInjection();
     installHelpTooltip();
     installCombatHook();
+    installPalaceMoveHook();
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", bootstrap);
@@ -1336,6 +1448,11 @@
     onRunVictory,
     onRunDefeat,
     isUnlocked,
+    // Palace rule debug
+    classifyMoveId,
+    pickSlotByNature,
+    isInPalaceRun,
+    NATURE_STYLE_WEIGHTS,
     // quick helper to reset all runs/symbols for testing
     resetAll: () => {
       if (typeof saved === "object" && saved) saved.frontierExt = null;
