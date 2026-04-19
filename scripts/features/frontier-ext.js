@@ -2610,18 +2610,34 @@
         // at line 448 via the buffer assignment).
         if (saved.currentArea !== RUN_AREA_ID) return res;
         if (typeof team === "undefined") return res;
-        // Filter by Pokémon ID (anti-cheese): if the player reordered
-        // their team or switched to a different preview team between
-        // pick and launch, we still keep only the exact mons they chose.
-        // Missing mons (e.g. player switched teams entirely) just don't
-        // fight — that's the natural penalty for tampering.
+
+        // Filter + PACK the team (anti-cheese). Two things to solve:
+        //   1. Anti-cheese: if the player reordered the team or switched
+        //      preview teams between pick and launch, keep only the
+        //      exact mons they picked (matched by Pokémon ID).
+        //   2. Pack to contiguous slots starting at slot1, because the
+        //      game hardcodes `exploreActiveMember = "slot1"` in
+        //      initialiseArea. Leaving slot1 empty would crash
+        //      updateTeamPkmn at team[slot1].pkmn.id lookup.
         const keep = new Set(run.domeSelection);
+        const kept = [];
         for (const slotKey of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
           const slot = team[slotKey];
           if (!slot) continue;
           const mon = slot.pkmn;
           const monId = mon && (mon.id || (typeof mon === "string" ? mon : null));
-          if (!monId || !keep.has(monId)) {
+          if (monId && keep.has(monId)) {
+            kept.push({ pkmn: slot.pkmn, item: slot.item });
+          }
+        }
+        const SLOTS = ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"];
+        for (let i = 0; i < SLOTS.length; i++) {
+          const slot = team[SLOTS[i]];
+          if (!slot) continue;
+          if (i < kept.length) {
+            slot.pkmn = kept[i].pkmn;
+            slot.item = kept[i].item;
+          } else {
             slot.pkmn = undefined;
             slot.item = undefined;
           }
