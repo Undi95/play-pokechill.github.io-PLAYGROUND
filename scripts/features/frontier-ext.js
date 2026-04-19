@@ -391,26 +391,34 @@
   // Pokémon pool built dynamically from the full dictionary. Filter by BST
   // total so difficulty scales with round, and optionally include
   // unobtainable / legendary mons at very high rounds (post-Gold multipliers).
-  //   tier 1 : BST 400-499  (Rounds 1-2)    no unobtainable
-  //   tier 2 : BST 500-579  (Rounds 3-5)    no unobtainable
-  //   tier 3 : BST 580-649  (Round 6, 8-48) no unobtainable
-  //   tier 4 : BST 580-679  (post-Gold r50+) includes unobtainable
-  //   tier 5 : BST 650+     (high post-Gold mult) includes unobtainable
+  // Ranges widened because early tests showed tier-1 nearly empty — turns
+  // out a lot of mid-tier mons sit around BST 350-480, not 400-499.
+  //   tier 1 : BST 300-499  (Rounds 1-2)    no unobtainable
+  //   tier 2 : BST 450-579  (Rounds 3-5)    no unobtainable
+  //   tier 3 : BST 540-649  (Round 6, 8-48) no unobtainable
+  //   tier 4 : BST 540-699  (post-Gold r50+) includes unobtainable
+  //   tier 5 : BST 600+     (high post-Gold mult) includes unobtainable
   const TIER_BST = {
-    1: { min: 400, max: 499, unobtainable: false },
-    2: { min: 500, max: 579, unobtainable: false },
-    3: { min: 580, max: 649, unobtainable: false },
-    4: { min: 580, max: 679, unobtainable: true },
-    5: { min: 650, max: 1200, unobtainable: true },
+    1: { min: 300, max: 499, unobtainable: false },
+    2: { min: 450, max: 579, unobtainable: false },
+    3: { min: 540, max: 649, unobtainable: false },
+    4: { min: 540, max: 699, unobtainable: true },
+    5: { min: 600, max: 1200, unobtainable: true },
   };
 
   function bstTotal(p) {
     if (!p || !p.bst) return 0;
-    return (p.bst.hp || 0) + (p.bst.atk || 0) + (p.bst.def || 0)
-         + (p.bst.satk || 0) + (p.bst.sdef || 0) + (p.bst.spe || 0);
+    const b = p.bst;
+    // Pokechill uses short keys (hp/atk/def/satk/sdef/spe) per
+    // pkmnDictionary.js line 12+. Guard each in case a mon ships without
+    // one of them (should never happen but defensive).
+    return (b.hp || 0) + (b.atk || 0) + (b.def || 0)
+         + (b.satk || 0) + (b.sdef || 0) + (b.spe || 0);
   }
 
-  // Cached per-tier pool (rebuilt lazily once pkmn dict is loaded).
+  // Cached per-tier pool. NOT frozen — the cache can be rebuilt via
+  // __frontierExt.resetPoolCache() if the pkmn dict changes at runtime or
+  // if the game data finishes loading after our first query.
   const _poolCache = {};
   function getPool(tier) {
     if (_poolCache[tier]) return _poolCache[tier];
@@ -430,6 +438,10 @@
     }
     _poolCache[tier] = ids.length ? ids : ["tauros"];
     return _poolCache[tier];
+  }
+
+  function resetPoolCache() {
+    for (const k of Object.keys(_poolCache)) delete _poolCache[k];
   }
 
   function pickFromPool(tier) {
@@ -1877,6 +1889,11 @@
     DOME_BRACKET_SIZE,
     difficultyMultiplier,
     getBossRoundInfo,
+    // Pool debug
+    getPool,
+    resetPoolCache,
+    bstTotal,
+    TIER_BST,
     // quick helper to reset all runs/symbols for testing
     resetAll: () => {
       if (typeof saved === "object" && saved) saved.frontierExt = null;
