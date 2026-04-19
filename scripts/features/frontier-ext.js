@@ -4717,11 +4717,18 @@
       const p = pkmn[rental.id];
       if (!p) continue;
       if (!run.factoryOriginalState[rental.id]) {
+        // Also stash level / exp / caught — without this, rentals of
+        // species the player never caught (legendaries, mythicals like
+        // Diancie) would keep pkmn[id].level = 1 default, and the
+        // combat engine would send a lv-1 rental against a lv-100 enemy.
         run.factoryOriginalState[rental.id] = {
           moves: p.moves ? { ...p.moves } : undefined,
           nature: p.nature,
           ivs: p.ivs ? { ...p.ivs } : undefined,
           ability: p.ability,
+          level: p.level,
+          exp: p.exp,
+          caught: p.caught,
         };
       }
       p.moves = {
@@ -4733,6 +4740,16 @@
       p.nature = rental.nature || "";
       p.ivs = { ...rental.ivs };
       p.ability = rental.ability || undefined;
+      // Force rental to level 100 regardless of whether the player has
+      // ever caught that species. `caught` >= 1 keeps the rental from
+      // being rejected by any "must be caught" pathway; the restore step
+      // puts both back to whatever the player actually had.
+      p.level = 100;
+      if (!p.caught || p.caught < 1) p.caught = 1;
+      // Level 100 in Pokechill corresponds to a specific exp threshold.
+      // Setting a very high value is safe: exp is clamped to the level's
+      // max by downstream code and never drives combat math directly.
+      p.exp = Math.max(p.exp || 0, 1000000);
     }
   }
   function restoreFactoryMoves(run) {
@@ -4743,6 +4760,9 @@
       pkmn[id].nature = orig.nature;
       pkmn[id].ivs = orig.ivs;
       pkmn[id].ability = orig.ability;
+      if ("level" in orig) pkmn[id].level = orig.level;
+      if ("exp"   in orig) pkmn[id].exp   = orig.exp;
+      if ("caught" in orig) pkmn[id].caught = orig.caught;
     }
     run.factoryOriginalState = {};
   }
@@ -5231,6 +5251,8 @@
 
     // Restore the OUTGOING rental's original pkmn state (we no longer
     // need it overridden; keep the user's data clean for the species).
+    // Includes level / exp / caught so rentals of never-caught species
+    // don't leak a level-100 entry into the dex after the swap.
     if (run.factoryOriginalState && run.factoryOriginalState[outgoing.id]
         && typeof pkmn !== "undefined" && pkmn[outgoing.id]) {
       const orig = run.factoryOriginalState[outgoing.id];
@@ -5238,6 +5260,9 @@
       pkmn[outgoing.id].nature = orig.nature;
       pkmn[outgoing.id].ivs = orig.ivs;
       pkmn[outgoing.id].ability = orig.ability;
+      if ("level" in orig) pkmn[outgoing.id].level = orig.level;
+      if ("exp"   in orig) pkmn[outgoing.id].exp   = orig.exp;
+      if ("caught" in orig) pkmn[outgoing.id].caught = orig.caught;
       delete run.factoryOriginalState[outgoing.id];
     }
 
