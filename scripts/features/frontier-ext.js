@@ -225,20 +225,185 @@
 
   // ─── 3. SAVE STATE ────────────────────────────────────────────────────────
   // Namespaced under saved.frontierExt so we never collide with vanilla game.
+  //   streaks    : current-run round counter (advances on each win)
+  //   maxStreaks : best round reached ever, per facility
+  //   symbols    : { silver, gold } flags per facility (round 7 / round 49)
+  //   activeRun  : in-progress run state (or null if idle):
+  //                { facilityId, round, upcomingTrainer }
   function ensureSaveSlot() {
     if (typeof saved !== "object" || !saved) return;
     if (!saved.frontierExt) {
       saved.frontierExt = {
-        streaks: {}, // { frontierPalace: 0, frontierDojo: 0, ... }
+        streaks: {},
         maxStreaks: {},
-        symbols: {}, // { frontierPalace: { silver: false, gold: false }, ... }
+        symbols: {},
+        activeRun: null,
       };
     }
+    if (saved.frontierExt.activeRun === undefined) saved.frontierExt.activeRun = null;
     for (const f of FACILITIES) {
       if (saved.frontierExt.streaks[f.id] === undefined) saved.frontierExt.streaks[f.id] = 0;
       if (saved.frontierExt.maxStreaks[f.id] === undefined) saved.frontierExt.maxStreaks[f.id] = 0;
       if (!saved.frontierExt.symbols[f.id]) saved.frontierExt.symbols[f.id] = { silver: false, gold: false };
     }
+  }
+
+  // ─── 3b. TRAINER GENERATOR ────────────────────────────────────────────────
+  // Builds a random trainer for non-boss rounds (1-6, 8-48, 50+). Bosses are
+  // round 7 / 49 — those use the facility's canonical brain team.
+  //
+  // Design goals:
+  //   • Every trainer has a diverse, functional team (STAB attacks + at least
+  //     one utility move per Pokémon).
+  //   • Difficulty scales with round: round 1-2 mid-tier, 3-5 strong,
+  //     6 / 8+ very strong, 49+ brutal.
+  //   • Sprites drawn from the 100+ available in img/trainers/ so the pool
+  //     feels populated.
+  const GENERIC_TRAINER_SPRITES = [
+    "aaron","aceTrainerSnowF","aceTrainerSnowM","alder","archie","aromaLady",
+    "artist","battlegirl","beauty","bertha","birdkeeper","blackBelt","blaine",
+    "blue","brendan","brock","bruno","bugCatcher","burgh","candice","channeler",
+    "clay","colress","crispin","cynthia","cyrus","dawn","diantha","drake",
+    "erika","firebreather","flint","geeta","grimsley","hiker","iris","janine",
+    "juan","karen","koga","lance","leaf","lorelei","lt_surge","maylene","may",
+    "misty","morty","norman","phoebe","pokebreeder","pokemaniac","red","roark",
+    "roxanne","roxie","sabrina","silver","skyla","swimmer","wallace","whitney",
+    "winona","youngster",
+  ];
+  const TRAINER_NAMES_FR = [
+    "Jean-Baptiste","Léa","Hugo","Océane","Mathis","Zoé","Alexandre","Emma",
+    "Tristan","Camille","Raphaël","Chloé","Nicolas","Sarah","Arthur","Juliette",
+    "Lucas","Manon","Gabriel","Inès","Noah","Louna","Elias","Jade",
+  ];
+  const TRAINER_NAMES_EN = [
+    "Jake","Lilly","Hugh","Olivia","Max","Zoe","Alex","Emma","Trent","Cam",
+    "Rafe","Chloe","Nick","Sarah","Arthur","Julie","Luke","Mandy","Gabe","Ines",
+    "Noah","Luna","Eli","Jade",
+  ];
+
+  // Pokémon pool for non-boss trainers, tagged by difficulty tier. Tier grows
+  // with the round so round-1 trainers feel different from round-6 trainers.
+  //   tier 1 : solid mid-BST mons (Rounds 1-2)
+  //   tier 2 : strong pseudo-legendary / meta (Rounds 3-5)
+  //   tier 3 : end-game heavy hitters (Round 6, 8-10, etc.)
+  const POOL_TIER = {
+    1: [
+      "vileplume","wigglytuff","ninetales","rapidash","weezing","muk","hypno",
+      "alakazam","machamp","arcanine","kadabra","rhydon","dodrio","tangela",
+      "kingler","kingdra","tauros","sandslash","primeape","golduck","fearow",
+    ],
+    2: [
+      "gengar","snorlax","gyarados","dragonite","tyranitar","blissey","salamence",
+      "metagross","garchomp","milotic","togekiss","heracross","breloom","mamoswine",
+      "scizor","aggron","weavile","starmie","venusaur","charizard","blastoise",
+    ],
+    3: [
+      "dragonite","tyranitar","salamence","metagross","garchomp","hydreigon",
+      "goodra","dragapult","kommoKommo","volcarona","excadrill","ferrothorn",
+      "conkeldurr","chandelure","haxorus","milotic","mamoswine","kingambit",
+    ],
+  };
+
+  function pickFromPool(tier) {
+    const list = POOL_TIER[tier] || POOL_TIER[1];
+    for (let tries = 0; tries < 20; tries++) {
+      const id = list[Math.floor(Math.random() * list.length)];
+      if (typeof pkmn !== "undefined" && pkmn[id]) return id;
+    }
+    // Hard fallback: any common mon that definitely exists
+    return "tauros";
+  }
+
+  // Pick 4 move ids for a given Pokémon id. Prioritises:
+  //   slot 1 : the mon's signature (always a strong fit)
+  //   slot 2 : highest-power STAB attack compatible with its primary type
+  //   slot 3 : utility move (status / debuff / buff)
+  //   slot 4 : second attack (different type, for coverage)
+  function pickMovesetFor(pkmnId) {
+    const p = typeof pkmn !== "undefined" ? pkmn[pkmnId] : null;
+    if (!p || typeof move === "undefined") return [];
+    const primaryType = Array.isArray(p.type) ? p.type[0] : p.type;
+    const secondaryType = Array.isArray(p.type) ? p.type[1] : null;
+
+    const chosen = [];
+    const pushIfOk = (mv) => {
+      if (!mv) return;
+      const id = mv.id || (mv === mv ? null : null);
+      // Match the rest of the codebase: we need move.id not the object
+      // (move entries have no explicit `id` property; the object key serves
+      // as identity, so derive it by comparing against move dict).
+      const key = Object.keys(move).find((k) => move[k] === mv);
+      if (!key) return;
+      if (chosen.indexOf(key) !== -1) return;
+      chosen.push(key);
+    };
+
+    // 1. Signature move if defined
+    if (p.signature) pushIfOk(p.signature);
+
+    // Build candidate lists once
+    const allMoves = Object.entries(move);
+    const typeOk = (mv, t) => {
+      if (!mv || !Array.isArray(mv.moveset)) return false;
+      return mv.moveset.indexOf(t) !== -1 || mv.moveset.indexOf("all") !== -1;
+    };
+    const isAttack = (mv) => mv.power && mv.power > 0;
+    const isStatus = (mv) => !mv.power || mv.power === 0;
+
+    // 2. Strongest STAB attack for primary type (power 70-130 range, rarity >= 2)
+    const stabPrimary = allMoves
+      .filter(([k, mv]) => mv.type === primaryType && typeOk(mv, primaryType) && isAttack(mv) && mv.power >= 65 && mv.power <= 150 && (mv.rarity || 0) >= 2)
+      .sort(([, a], [, b]) => (b.power || 0) - (a.power || 0));
+    if (stabPrimary[0]) pushIfOk(stabPrimary[0][1]);
+
+    // 3. Utility move (status, low power, rarity >= 2, primary or "all" moveset)
+    const utility = allMoves
+      .filter(([k, mv]) => typeOk(mv, primaryType) && isStatus(mv) && (mv.rarity || 0) >= 2);
+    if (utility.length) {
+      const u = utility[Math.floor(Math.random() * utility.length)];
+      pushIfOk(u[1]);
+    }
+
+    // 4. Coverage attack — different type from primary, strong
+    const coverageType = secondaryType || "normal";
+    const coverage = allMoves
+      .filter(([k, mv]) => mv.type === coverageType && typeOk(mv, coverageType) && isAttack(mv) && mv.power >= 60 && mv.power <= 130 && (mv.rarity || 0) >= 2)
+      .sort(([, a], [, b]) => (b.power || 0) - (a.power || 0));
+    if (coverage[0]) pushIfOk(coverage[0][1]);
+
+    // Pad with tackle if we somehow came short
+    while (chosen.length < 4) {
+      if (move.tackle && chosen.indexOf("tackle") === -1) chosen.push("tackle");
+      else break;
+    }
+    return chosen.slice(0, 4);
+  }
+
+  function generateTrainer(round, facility) {
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const nameList = lang === "fr" ? TRAINER_NAMES_FR : TRAINER_NAMES_EN;
+    const name = nameList[Math.floor(Math.random() * nameList.length)];
+    const sprite = GENERIC_TRAINER_SPRITES[Math.floor(Math.random() * GENERIC_TRAINER_SPRITES.length)];
+
+    // Round-based tier scaling
+    let tier = 1;
+    if (round >= 3) tier = 2;
+    if (round >= 6) tier = 3;
+    if (round >= 20) tier = 3;
+
+    const slots = [1, 2, 3].map(() => {
+      const id = pickFromPool(tier);
+      return { id, moves: pickMovesetFor(id) };
+    });
+
+    return {
+      name,
+      sprite,
+      team: slots,
+      tier,
+      round,
+      facilityId: facility.id,
+    };
   }
 
   // ─── 4. STYLES (injected, same pattern as i18n lang-toggle) ───────────────
@@ -381,6 +546,35 @@
         opacity: 0.85;
         font-style: italic;
       }
+      /* Run-action buttons inside the modal bottom. */
+      .frontier-ext-run-actions {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.6rem 0.8rem 0.8rem;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .frontier-ext-action-btn {
+        border: none;
+        border-radius: 0.3rem;
+        padding: 0.5rem 1rem;
+        font-size: 0.95rem;
+        cursor: pointer;
+        background: var(--dark1, #2a1a0a);
+        color: var(--light1, #f5e6c8);
+        transition: transform 0.1s, filter 0.15s;
+        font-weight: bold;
+      }
+      .frontier-ext-action-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
+      .frontier-ext-action-btn:active { transform: translateY(0); }
+      .frontier-ext-action-btn.primary {
+        background: #6ab04c;
+        color: white;
+      }
+      .frontier-ext-action-btn.danger {
+        background: #c0392b;
+        color: white;
+      }
     `;
     const style = document.createElement("style");
     style.id = "frontier-ext-css";
@@ -499,16 +693,43 @@
     if (typeof openTooltip === "function") openTooltip();
   }
 
-  // ─── 6. PREVIEW MODAL (placeholder — will launch combat later) ────────────
+  // ─── 6. FACILITY PREVIEW / RUN MODAL ──────────────────────────────────────
+  // Left-click on an unlocked tile opens this. Shows different content
+  // depending on whether a run is already in progress for this facility.
   function openFacilityPreview(facility) {
     const lang = window.gameLang === "fr" ? "fr" : "en";
     const name = lang === "fr" ? facility.nameFr : facility.nameEn;
-    const desc = lang === "fr" ? facility.descFr : facility.descEn;
     const brainName = lang === "fr" ? facility.brain.nameFr : facility.brain.nameEn;
-    const comingSoon = lang === "fr"
-      ? "⚠️ Combat à venir — cette facility est en développement."
-      : "⚠️ Battle coming soon — this facility is under development.";
-    const brainLabel = lang === "fr" ? "Cerveau de la Frontière :" : "Frontier Brain:";
+
+    ensureSaveSlot();
+    const run = saved.frontierExt.activeRun;
+    const isActive = run && run.facilityId === facility.id;
+
+    const t = lang === "fr"
+      ? {
+          brain: "Cerveau :",
+          maxStreak: "Meilleure série :",
+          inProgress: "Série en cours",
+          start: "Commencer une série",
+          cont: "Continuer (Round {r})",
+          abandon: "Abandonner",
+          round: "Round",
+          brainIncoming: "⚡ Round 7 — le Cerveau de la Frontière approche !",
+          goldIncoming: "💎 Round 49 — rematch Or !",
+        }
+      : {
+          brain: "Brain:",
+          maxStreak: "Best streak:",
+          inProgress: "Run in progress",
+          start: "Start a run",
+          cont: "Continue (Round {r})",
+          abandon: "Abandon",
+          round: "Round",
+          brainIncoming: "⚡ Round 7 — the Frontier Brain is next!",
+          goldIncoming: "💎 Round 49 — Gold rematch!",
+        };
+
+    const maxStreak = saved.frontierExt.maxStreaks[facility.id] || 0;
 
     const top = document.getElementById("tooltipTop");
     const title = document.getElementById("tooltipTitle");
@@ -523,21 +744,209 @@
       title.style.display = "block";
       title.innerHTML = name;
     }
+
+    const nextRound = isActive ? run.round + 1 : 1;
+    const isBossRound = nextRound === SILVER_ROUND || nextRound === GOLD_ROUND;
+
     if (mid) {
       mid.style.display = "block";
-      mid.innerHTML = `<div style="padding: 0.5rem;">${desc}</div>`;
+      let html = `<div style="padding:0.4rem 0.8rem;font-style:italic;opacity:0.9;">`;
+      if (isActive) {
+        html += `<strong>${t.inProgress}</strong> — ${t.round} ${run.round + 1}/${SILVER_ROUND}`;
+      } else {
+        html += `${lang === "fr" ? facility.descFr : facility.descEn}`;
+      }
+      html += `</div>`;
+      if (isBossRound && isActive) {
+        html += `<div style="padding:0.3rem 0.8rem;color:#ffd700;font-weight:bold;">${nextRound === SILVER_ROUND ? t.brainIncoming : t.goldIncoming}</div>`;
+      }
+      mid.innerHTML = html;
+    }
+
+    if (bottom) {
+      bottom.style.display = "block";
+      const buttons = isActive
+        ? `
+          <button class="frontier-ext-action-btn primary" data-action="continue">${t.cont.replace("{r}", run.round + 1)}</button>
+          <button class="frontier-ext-action-btn danger" data-action="abandon">${t.abandon}</button>
+        `
+        : `
+          <button class="frontier-ext-action-btn primary" data-action="start">${t.start}</button>
+        `;
+
+      bottom.innerHTML = `
+        <div class="frontier-ext-help-rules" style="grid-template-columns:auto 1fr;">
+          <span class="label">${t.brain}</span>
+          <span class="value">${brainName}</span>
+          <span class="label">${t.maxStreak}</span>
+          <span class="value">${maxStreak}</span>
+        </div>
+        <div class="frontier-ext-run-actions">${buttons}</div>
+      `;
+
+      bottom.querySelectorAll("[data-action]").forEach((btn) => {
+        btn.onclick = () => handleRunAction(btn.dataset.action, facility);
+      });
+    }
+
+    if (typeof openTooltip === "function") openTooltip();
+  }
+
+  // Shows upcoming trainer + simulate win/loss buttons (placeholder until
+  // real combat is wired in Étape 2).
+  function openSimulatedFight(facility) {
+    ensureSaveSlot();
+    const run = saved.frontierExt.activeRun;
+    if (!run || run.facilityId !== facility.id) return;
+
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const nextRound = run.round + 1;
+    const isSilverBoss = nextRound === SILVER_ROUND;
+    const isGoldBoss = nextRound === GOLD_ROUND;
+
+    const t = lang === "fr"
+      ? {
+          round: "Round",
+          vs: "vs",
+          combatTbd: "⚙️ Le combat réel n'est pas encore branché — simule le résultat :",
+          simWin: "✓ Simuler une victoire",
+          simLoss: "✗ Simuler une défaite",
+          cancel: "Annuler",
+        }
+      : {
+          round: "Round",
+          vs: "vs",
+          combatTbd: "⚙️ Real combat not wired yet — simulate the outcome:",
+          simWin: "✓ Simulate win",
+          simLoss: "✗ Simulate loss",
+          cancel: "Cancel",
+        };
+
+    // Generate or reuse the upcoming trainer
+    let trainer;
+    if (isSilverBoss || isGoldBoss) {
+      const brainTeam = isSilverBoss ? facility.brain.teamSilver : facility.brain.teamGold;
+      trainer = {
+        name: lang === "fr" ? facility.brain.nameFr : facility.brain.nameEn,
+        sprite: facility.brain.sprite,
+        team: brainTeam
+          ? brainTeam.map((id) => ({ id, moves: pickMovesetFor(id) }))
+          : [1, 2, 3].map(() => {
+              const id = pickFromPool(3);
+              return { id, moves: pickMovesetFor(id) };
+            }),
+        isBoss: true,
+      };
+    } else {
+      trainer = generateTrainer(nextRound, facility);
+    }
+    run.upcomingTrainer = trainer;
+
+    const top = document.getElementById("tooltipTop");
+    const title = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+
+    if (top) {
+      top.style.display = "block";
+      top.innerHTML = `<img src="img/trainers/${trainer.sprite}.png" style="max-height: 140px; image-rendering: pixelated;" alt="${trainer.name}">`;
+    }
+    if (title) {
+      title.style.display = "block";
+      title.innerHTML = `${t.round} ${nextRound} — ${trainer.name}`;
+    }
+    if (mid) {
+      mid.style.display = "block";
+      const teamPreview = trainer.team
+        .map((slot) => (typeof format === "function" ? format(slot.id) : slot.id))
+        .join(" · ");
+      mid.innerHTML = `
+        <div style="padding:0.5rem 0.8rem;">
+          <div style="opacity:0.75;font-size:0.9rem;">${t.vs}</div>
+          <div style="font-weight:bold;margin-top:0.2rem;">${teamPreview}</div>
+        </div>
+      `;
     }
     if (bottom) {
       bottom.style.display = "block";
       bottom.innerHTML = `
-        <div style="padding: 0.5rem; line-height: 1.5;">
-          <div><strong>${brainLabel}</strong> ${brainName}</div>
-          <div style="opacity: 0.7; margin-top: 0.3rem;">${comingSoon}</div>
+        <div style="padding:0.4rem 0.8rem;color:var(--dark1,#2a1a0a);font-style:italic;">${t.combatTbd}</div>
+        <div class="frontier-ext-run-actions">
+          <button class="frontier-ext-action-btn primary" data-action="sim-win">${t.simWin}</button>
+          <button class="frontier-ext-action-btn danger" data-action="sim-loss">${t.simLoss}</button>
+          <button class="frontier-ext-action-btn" data-action="back">${t.cancel}</button>
         </div>
       `;
+      bottom.querySelectorAll("[data-action]").forEach((btn) => {
+        btn.onclick = () => handleRunAction(btn.dataset.action, facility);
+      });
     }
-
     if (typeof openTooltip === "function") openTooltip();
+  }
+
+  function handleRunAction(action, facility) {
+    ensureSaveSlot();
+    const run = saved.frontierExt.activeRun;
+
+    if (action === "start") {
+      saved.frontierExt.activeRun = {
+        facilityId: facility.id,
+        round: 0,
+        upcomingTrainer: null,
+      };
+      saved.frontierExt.streaks[facility.id] = 0;
+      openSimulatedFight(facility);
+      return;
+    }
+    if (action === "continue") {
+      openSimulatedFight(facility);
+      return;
+    }
+    if (action === "abandon") {
+      if (run) {
+        const finalRound = run.round;
+        if (finalRound > (saved.frontierExt.maxStreaks[facility.id] || 0)) {
+          saved.frontierExt.maxStreaks[facility.id] = finalRound;
+        }
+      }
+      saved.frontierExt.activeRun = null;
+      if (typeof updateFrontier === "function") updateFrontier();
+      if (typeof closeTooltip === "function") closeTooltip();
+      return;
+    }
+    if (action === "back") {
+      openFacilityPreview(facility);
+      return;
+    }
+    if (action === "sim-win") {
+      if (!run) return;
+      run.round += 1;
+      saved.frontierExt.streaks[facility.id] = run.round;
+      if (run.round > (saved.frontierExt.maxStreaks[facility.id] || 0)) {
+        saved.frontierExt.maxStreaks[facility.id] = run.round;
+      }
+      if (run.round === SILVER_ROUND) {
+        saved.frontierExt.symbols[facility.id].silver = true;
+      } else if (run.round === GOLD_ROUND) {
+        saved.frontierExt.symbols[facility.id].gold = true;
+      }
+      run.upcomingTrainer = null;
+      openFacilityPreview(facility);
+      return;
+    }
+    if (action === "sim-loss") {
+      if (run) {
+        const finalRound = run.round;
+        if (finalRound > (saved.frontierExt.maxStreaks[facility.id] || 0)) {
+          saved.frontierExt.maxStreaks[facility.id] = finalRound;
+        }
+      }
+      saved.frontierExt.activeRun = null;
+      saved.frontierExt.streaks[facility.id] = 0;
+      if (typeof updateFrontier === "function") updateFrontier();
+      if (typeof closeTooltip === "function") closeTooltip();
+      return;
+    }
   }
 
   // ─── 6b. HELP TOOLTIP (right-click / long-press) ──────────────────────────
@@ -691,5 +1100,16 @@
     ensureSaveSlot,
     buildTile,
     openFacilityPreview,
+    generateTrainer,
+    pickMovesetFor,
+    pickFromPool,
+    handleRunAction,
+    isUnlocked,
+    // quick helper to reset all runs/symbols for testing
+    resetAll: () => {
+      if (typeof saved === "object" && saved) saved.frontierExt = null;
+      ensureSaveSlot();
+      if (typeof updateFrontier === "function") updateFrontier();
+    },
   };
 })();
