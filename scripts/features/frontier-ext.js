@@ -3009,10 +3009,16 @@
           inProgress: "Série en cours",
           start: "Commencer une série",
           cont: "Continuer (Round {r})",
+          rest: "Repos",
           abandon: "Abandonner",
           round: "Round",
-          brainIncoming: "⚡ Round 7 — le Cerveau de la Frontière approche !",
-          goldIncoming: "💎 Round 49 — rematch Or !",
+          // Banner texts are formatted with the actual silver/gold
+          // threshold of THIS facility (not a hardcoded 7/49). For
+          // rematches we include the multiplier so the player sees
+          // "×2" / "×3" escalation at a glance.
+          silverBanner: (r)    => `⚡ Round ${r} — le Cerveau de la Frontière (Argent) t'attend !`,
+          goldBanner:   (r)    => `💎 Round ${r} — le Cerveau de la Frontière (Or) t'attend !`,
+          rematchBanner:(r, m) => `🔥 Round ${r} — revanche du Cerveau ×${m} !`,
         }
       : {
           brain: "Brain:",
@@ -3020,10 +3026,12 @@
           inProgress: "Run in progress",
           start: "Start a run",
           cont: "Continue (Round {r})",
+          rest: "Rest",
           abandon: "Abandon",
           round: "Round",
-          brainIncoming: "⚡ Round 7 — the Frontier Brain is next!",
-          goldIncoming: "💎 Round 49 — Gold rematch!",
+          silverBanner: (r)    => `⚡ Round ${r} — the Frontier Brain (Silver) is next!`,
+          goldBanner:   (r)    => `💎 Round ${r} — the Frontier Brain (Gold) is next!`,
+          rematchBanner:(r, m) => `🔥 Round ${r} — Brain rematch ×${m}!`,
         };
 
     const maxStreak = saved.frontierExt.maxStreaks[facility.id] || 0;
@@ -3070,17 +3078,28 @@
       html += `</div>`;
       if (isBossRound && isActive) {
         const info = getBossRoundInfo(nextRound, facility);
-        const bannerTxt = (info && info.kind === "silver") ? t.brainIncoming : t.goldIncoming;
-        html += `<div style="padding:0.3rem 0.8rem;color:#ffd700;font-weight:bold;">${bannerTxt}</div>`;
+        let bannerTxt = "";
+        if (info) {
+          if (info.kind === "silver")      bannerTxt = t.silverBanner(nextRound);
+          else if (info.kind === "gold")   bannerTxt = t.goldBanner(nextRound);
+          else /* rematch */                bannerTxt = t.rematchBanner(nextRound, info.multiplier);
+        }
+        if (bannerTxt) html += `<div style="padding:0.3rem 0.8rem;color:#ffd700;font-weight:bold;">${bannerTxt}</div>`;
       }
       mid.innerHTML = html;
     }
 
     if (bottom) {
       bottom.style.display = "block";
+      // In-progress row: Continue (primary) + Rest (neutral, pauses
+      // without killing the streak) + Abandon (danger). Matches the
+      // round-cleared modal layout so the player sees the same three
+      // choices whether they're between rounds or just reopened the
+      // facility tile mid-paused-run.
       const buttons = isActive
         ? `
           <button class="frontier-ext-action-btn primary" data-action="continue">${t.cont.replace("{r}", run.round + 1)}</button>
+          <button class="frontier-ext-action-btn" data-action="rest">${t.rest}</button>
           <button class="frontier-ext-action-btn danger" data-action="abandon">${t.abandon}</button>
         `
         : `
