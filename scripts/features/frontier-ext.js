@@ -1235,11 +1235,11 @@
       const playerCtr = document.getElementById("frontier-ext-dome-player");
       if (playerCtr) {
         playerCtr.innerHTML = playerMons.map((m) => {
-          const selected = run.domeSelection.indexOf(m.slot) !== -1;
-          return `<div class="frontier-ext-dome-card player${selected ? " selected" : ""}" data-slot="${m.slot}"><img src="img/pkmn/sprite/${m.id}.png" alt="${m.id}"><div>${typeof format === "function" ? format(m.id) : m.id}</div></div>`;
+          const selected = run.domeSelection.indexOf(m.id) !== -1;
+          return `<div class="frontier-ext-dome-card player${selected ? " selected" : ""}" data-monid="${m.id}"><img src="img/pkmn/sprite/${m.id}.png" alt="${m.id}"><div>${typeof format === "function" ? format(m.id) : m.id}</div></div>`;
         }).join("");
-        playerCtr.querySelectorAll("[data-slot]").forEach((el) => {
-          el.onclick = () => toggleDomeSelection(el.dataset.slot, facility);
+        playerCtr.querySelectorAll("[data-monid]").forEach((el) => {
+          el.onclick = () => toggleDomeSelection(el.dataset.monid, facility);
         });
       }
     }
@@ -1262,21 +1262,26 @@
     if (typeof openTooltip === "function") openTooltip();
   }
 
-  function toggleDomeSelection(slot, facility) {
+  // Selection stores Pokémon IDs (not slot keys) so reorders or team
+  // switches between pick-time and launch-time can't cheese. If the
+  // player moves their mons around, the match still uses the exact
+  // Pokémon they chose. If they switch to a different preview team
+  // that doesn't contain one of the picked IDs, the missing slot stays
+  // empty — natural penalty for trying to cheat.
+  function toggleDomeSelection(monId, facility) {
     const run = saved.frontierExt.activeRun;
     if (!run) return;
     if (!run.domeSelection) run.domeSelection = [];
-    const idx = run.domeSelection.indexOf(slot);
+    const idx = run.domeSelection.indexOf(monId);
     if (idx !== -1) {
       run.domeSelection.splice(idx, 1);
     } else if (run.domeSelection.length < DOME_ACTIVE_SIZE) {
-      run.domeSelection.push(slot);
+      run.domeSelection.push(monId);
     } else {
-      // Replace oldest selection when trying to select a third
       run.domeSelection.shift();
-      run.domeSelection.push(slot);
+      run.domeSelection.push(monId);
     }
-    openDomePokemonSelection(facility); // re-render
+    openDomePokemonSelection(facility);
   }
 
   // GLOBAL SAFETY RULE: this overlay MUST NEVER mutate saved.previewTeams.
@@ -1340,11 +1345,20 @@
         // at line 448 via the buffer assignment).
         if (saved.currentArea !== RUN_AREA_ID) return res;
         if (typeof team === "undefined") return res;
+        // Filter by Pokémon ID (anti-cheese): if the player reordered
+        // their team or switched to a different preview team between
+        // pick and launch, we still keep only the exact mons they chose.
+        // Missing mons (e.g. player switched teams entirely) just don't
+        // fight — that's the natural penalty for tampering.
         const keep = new Set(run.domeSelection);
         for (const slotKey of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
-          if (!keep.has(slotKey) && team[slotKey]) {
-            team[slotKey].pkmn = undefined;
-            team[slotKey].item = undefined;
+          const slot = team[slotKey];
+          if (!slot) continue;
+          const mon = slot.pkmn;
+          const monId = mon && (mon.id || (typeof mon === "string" ? mon : null));
+          if (!monId || !keep.has(monId)) {
+            slot.pkmn = undefined;
+            slot.item = undefined;
           }
         }
       } catch (e) {
