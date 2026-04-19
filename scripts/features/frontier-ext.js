@@ -1590,6 +1590,43 @@
       .frontier-ext-tile.locked .frontier-ext-inprogress-tag {
         display: none;
       }
+      /* Heat sticker — orange-red flame pill that rides next to the
+         in-progress badge whenever the active run's upcoming round has a
+         post-Gold difficulty multiplier ≥ 2. Disappears instantly when the
+         streak ends (activeRun becomes null → tile rerenders without the
+         tag). Counter-rotates the facility's hue like the medals so the
+         orange stays orange across every tile colour.  */
+      .frontier-ext-heat-tag {
+        display: inline-block;
+        margin-left: 0.3rem;
+        padding: 0.1rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.78rem;
+        font-weight: bold;
+        letter-spacing: 0.03em;
+        color: #fff2c0;
+        background: linear-gradient(90deg, #c23616, #e67e22 55%, #c23616);
+        text-shadow: 0 0 3px rgba(255, 120, 60, 0.75);
+        box-shadow:
+          0 0 0 1px rgba(255, 180, 80, 0.4),
+          0 0 8px rgba(231, 126, 34, 0.55);
+        filter: hue-rotate(calc(var(--hue, 0deg) * -1));
+        vertical-align: middle;
+        animation: frontierHeatPulse 1.6s ease-in-out infinite;
+      }
+      @keyframes frontierHeatPulse {
+        0%, 100% {
+          box-shadow:
+            0 0 0 1px rgba(255, 180, 80, 0.4),
+            0 0 6px rgba(231, 126, 34, 0.55);
+        }
+        50% {
+          box-shadow:
+            0 0 0 1px rgba(255, 220, 120, 0.6),
+            0 0 14px rgba(231, 126, 34, 0.95);
+        }
+      }
+      .frontier-ext-tile.locked .frontier-ext-heat-tag { display: none; }
       .frontier-ext-streak {
         background: #4a4a6a;
         color: white;
@@ -2764,6 +2801,22 @@
     const inProgressTag = isRunHere
       ? `<span class="frontier-ext-inprogress-tag" title="Run ${activeRun.round + 1}/${nextGoalRoundFor(activeRun.round + 1, facility)}">● ${inProgressLabel}</span>`
       : "";
+    // "🔥 Difficulté croissante" sticker: lights up on the facility tile
+    // as soon as the player enters a post-Gold rematch cycle (mult ≥ 2).
+    // Disappears automatically when the streak breaks because activeRun
+    // gets nulled on defeat / abandon / silent-kill-with-modal. Multiplier
+    // reflects the upcoming round so the tile updates live as the run
+    // progresses past each rematch threshold.
+    let heatTag = "";
+    if (isRunHere) {
+      const upcomingMult = difficultyMultiplier(activeRun.round + 1, facility);
+      if (upcomingMult >= 2) {
+        const heatTitle = lang === "fr"
+          ? `Difficulté ×${upcomingMult} — série en zone rematch`
+          : `Difficulty ×${upcomingMult} — rematch streak`;
+        heatTag = `<span class="frontier-ext-heat-tag" title="${heatTitle}">🔥 ×${upcomingMult}</span>`;
+      }
+    }
 
     const tile = document.createElement("div");
     tile.className = "explore-ticket frontier-ticket frontier-ext-tile" + (unlocked ? "" : " locked");
@@ -2793,6 +2846,7 @@
             <span class="frontier-ext-symbol ${goldClass}" title="Gold Symbol (round ${goldRoundFor(facility)})">●</span>
             <span class="frontier-ext-repeatable-tag">${repeatableLabel}</span>
             ${inProgressTag}
+            ${heatTag}
           </span>
         </span>
       </div>
@@ -3576,25 +3630,44 @@
         : "";
       title.innerHTML = `${t.round} ${nextRound}${battleStr} — ${trainer.name}`;
     }
-    // Mini-boss tag: surface to the player that this last-of-round
-    // trainer is boosted (hidden ability + higher IV + extra HP pool)
-    // so they can anticipate a harder fight before committing.
+    // Boss / mini-boss tag: surface the encounter's true threat level
+    // so the player can anticipate before committing.
+    //   • Brain fight (silver / gold / post-Gold rematch) → gold banner
+    //   • Mini-boss (last battle of a non-boss round)     → orange banner
+    //   • Regular fight                                    → no banner
     const miniBoss = isMiniBossBattle(run, facility);
-    const miniBossLabel = miniBoss
-      ? (lang === "fr"
-          ? "⚡ Gardien de round — dresseur renforcé (stats maxées, talent caché)"
-          : "⚡ Round guardian — enhanced trainer (maxed stats, hidden ability)")
-      : "";
+    const bossInfoForBanner = (isSilverBoss || isGoldBoss)
+      ? getBossRoundInfo(nextRound, facility)
+      : null;
+    let bossBannerHtml = "";
+    if (bossInfoForBanner) {
+      const multStr = bossInfoForBanner.multiplier > 1 ? ` ×${bossInfoForBanner.multiplier}` : "";
+      const label = lang === "fr"
+        ? (bossInfoForBanner.kind === "silver"
+            ? "⚡ Cerveau de la Frontière (Argent) — équipe canonique, talent caché"
+            : bossInfoForBanner.kind === "gold"
+              ? "💎 Cerveau de la Frontière (Or) — équipe upgradée, full IV"
+              : `🔥 Revanche du Cerveau${multStr} — équipe renforcée, multiplicateur actif`)
+        : (bossInfoForBanner.kind === "silver"
+            ? "⚡ Frontier Brain (Silver) — canonical team, hidden ability"
+            : bossInfoForBanner.kind === "gold"
+              ? "💎 Frontier Brain (Gold) — upgraded team, max IVs"
+              : `🔥 Brain rematch${multStr} — enhanced team, multiplier active`);
+      bossBannerHtml = `<div style="padding:0.35rem 0.8rem;color:#ffd700;font-weight:bold;font-size:0.95rem;text-shadow:0 0 5px rgba(255,215,0,0.5);border-left:3px solid rgba(255,215,0,0.55);margin:0.3rem 0.5rem;">${label}</div>`;
+    } else if (miniBoss) {
+      const miniBossLabel = lang === "fr"
+        ? "⚡ Gardien de round — dresseur renforcé (stats maxées, talent caché)"
+        : "⚡ Round guardian — enhanced trainer (maxed stats, hidden ability)";
+      bossBannerHtml = `<div style="padding:0.3rem 0.8rem;color:#ffb347;font-weight:bold;font-size:0.92rem;text-shadow:0 0 4px rgba(255,140,0,0.4);">${miniBossLabel}</div>`;
+    }
+
     if (mid) {
       mid.style.display = "block";
       const teamPreview = trainer.team
         .map((slot) => (typeof format === "function" ? format(slot.id) : slot.id))
         .join(" · ");
-      const miniBossBanner = miniBoss
-        ? `<div style="padding:0.3rem 0.8rem;color:#ffb347;font-weight:bold;font-size:0.92rem;text-shadow:0 0 4px rgba(255,140,0,0.4);">${miniBossLabel}</div>`
-        : "";
       mid.innerHTML = `
-        ${miniBossBanner}
+        ${bossBannerHtml}
         <div style="padding:0.5rem 0.8rem;">
           <div style="opacity:0.75;font-size:0.9rem;">${t.vs}</div>
           <div style="font-weight:bold;margin-top:0.2rem;">${teamPreview}</div>
