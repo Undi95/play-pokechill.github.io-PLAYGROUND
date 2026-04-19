@@ -7939,8 +7939,10 @@
     ensureHoennListing();
 
     // Wrap vanilla updateFrontier: after it finishes, re-add the Hoenn
-    // tab button + hide our listing (so BF and Hoenn listings don't show
-    // simultaneously).
+    // tab button + hide our listing AND restore display on the listing
+    // the vanilla just populated (updateHoennBF hides it with
+    // style.display="none" when the player last switched away — vanilla
+    // doesn't re-set display on its own).
     const origUpdateFrontier = window.updateFrontier;
     window.updateFrontier = function () {
       const res = origUpdateFrontier.apply(this, arguments);
@@ -7952,6 +7954,10 @@
           hoennListing.innerHTML = "";
           hoennListing.style.display = "none";
         }
+        const frontierListing = document.getElementById("frontier-listing");
+        const vsListing = document.getElementById("vs-listing");
+        if (frontierListing) frontierListing.style.display = "";
+        if (vsListing) vsListing.style.display = "none";
         if (typeof translateDOM === "function" && window.gameLang === "fr") {
           requestAnimationFrame(translateDOM);
         }
@@ -7961,7 +7967,10 @@
       return res;
     };
 
-    // Same for updateVS (Trainers tab).
+    // Same for updateVS (Trainers tab): un-hide vs-listing, hide the
+    // other two. Without this, clicking Trainers after visiting the
+    // Hoenn tab left vs-listing styled display:none → empty screen
+    // even though vanilla had rebuilt the innerHTML correctly.
     const origUpdateVS = window.updateVS;
     window.updateVS = function () {
       const res = origUpdateVS.apply(this, arguments);
@@ -7973,6 +7982,10 @@
           hoennListing.innerHTML = "";
           hoennListing.style.display = "none";
         }
+        const frontierListing = document.getElementById("frontier-listing");
+        const vsListing = document.getElementById("vs-listing");
+        if (vsListing) vsListing.style.display = "";
+        if (frontierListing) frontierListing.style.display = "none";
       } catch (e) {
         console.error("[frontier-ext] updateVS hook failed:", e);
       }
