@@ -3452,6 +3452,17 @@
         showTeamSizeError(facility);
         return;
       }
+      // Re-tie the run to the currently-selected preview slot. Between
+      // rounds the team is unlocked by design (players want to edit or
+      // swap teams), and the onRunVictory tied-team guard used to
+      // silently abandon runs when the tied slot's count drifted —
+      // which is exactly what happens if you swap to a different team
+      // or remove a mon from the tied one. Re-tying on every resume so
+      // the guard only ever sees the team the player is actually about
+      // to fight with. Factory keeps its private FACTORY_PREVIEW_SLOT.
+      if (run && !isFactoryFacility(facility)) {
+        run.tiedPreviewSlot = saved.currentPreviewTeam;
+      }
       // Consume the between-rounds unlock flag so the team re-locks as
       // soon as the player commits to the next round preview.
       if (run) run.roundJustCleared = false;
@@ -3488,6 +3499,12 @@
       if (!isFactoryFacility(facility) && currentPreviewTeamSize() !== 3) {
         showTeamSizeError(facility);
         return;
+      }
+      // Re-tie the run to the current preview slot — see the identical
+      // block in the "continue" action for the rationale (silent-abandon
+      // fix when the player swaps teams between rounds).
+      if (run && !isFactoryFacility(facility)) {
+        run.tiedPreviewSlot = saved.currentPreviewTeam;
       }
       // Consume the between-rounds unlock flag — from this point the
       // team is committed to the upcoming round and locked again.
@@ -6911,6 +6928,28 @@
     if (typeof openTooltip === "function") openTooltip();
   }
 
+  // Shown when a run is forced to end because the tied preview slot drifted
+  // below 3 Pokémon AND the current preview slot isn't a valid fallback.
+  // Replaces what used to be a silent activeRun=null assignment — players
+  // kept reporting streaks that "vanished" mid-run (e.g. Tour locked at 16,
+  // Palais at 11) without any message. Now they see the why.
+  function showTiedTeamLostModal(facility) {
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const title = lang === "fr" ? "Série interrompue" : "Run ended";
+    const msg = lang === "fr"
+      ? `L'équipe liée à ta série a moins de 3 Pokémon — impossible de continuer avec une équipe incomplète. Tu peux relancer une nouvelle série dès que ton équipe est de nouveau à 3. <br><br><em>Astuce : entre les rounds, garde la même sélection d'équipe ou remplis les 3 slots avant de cliquer « Continuer ».</em>`
+      : `The team tied to your run has fewer than 3 Pokémon — runs can't continue on an incomplete team. Start a new streak once your team is back to 3. <br><br><em>Tip: between rounds, keep the same team selection or refill to 3 before clicking "Continue".</em>`;
+    const top = document.getElementById("tooltipTop");
+    const titleEl = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+    if (top) top.style.display = "none";
+    if (titleEl) { titleEl.style.display = "block"; titleEl.innerHTML = "⚠️ " + title; }
+    if (mid) { mid.style.display = "block"; mid.innerHTML = `<div style="padding:0.7rem 0.9rem;line-height:1.35;">${msg}</div>`; }
+    if (bottom) bottom.style.display = "none";
+    if (typeof openTooltip === "function") openTooltip();
+  }
+
   // Kick off a real combat round. Same flow as vanilla tile click:
   //   1) set saved.currentAreaBuffer
   //   2) show the team-preview menu
@@ -7038,14 +7077,29 @@
     // invalid tied team means something slipped past the per-entry
     // guards. Refuse to credit the streak and abandon the run instead
     // of advancing. Factory is exempt (rentals, no tied preview).
+    //
+    // Historically silent — which meant players who swapped or edited
+    // their preview slot between rounds would have their run vanish
+    // mid-progression without ever seeing a message. Now visible: we
+    // pop a clear tooltip explaining what happened, and only then kill
+    // the run. Defensive: also re-tie to currentPreviewTeam if THAT
+    // slot has 3 — gives the player an automatic recovery before we
+    // have to abandon at all.
     if (!isFactoryFacility(facility) && tiedTeamSize(run) !== 3) {
-      // Silent abandon — we don't want to fire showTeamSizeError here
-      // since the caller may not be showing a tooltip (leaveCombat
-      // path). Just clear activeRun + unlock team.
-      saved.frontierExt.activeRun = null;
-      try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
-      if (typeof updateFrontier === "function") updateFrontier();
-      return;
+      if (currentPreviewTeamSize() === 3) {
+        // Silent auto-heal: the CURRENT team is valid, the tied slot
+        // just drifted. Re-point the tied slot and continue as if
+        // nothing happened — the streak lives.
+        run.tiedPreviewSlot = saved.currentPreviewTeam;
+      } else {
+        // Current team also invalid → no way to continue. Show the
+        // player WHY their streak ended instead of silently nuking it.
+        try { showTiedTeamLostModal(facility); } catch (e) { /* ignore */ }
+        saved.frontierExt.activeRun = null;
+        try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
+        if (typeof updateFrontier === "function") updateFrontier();
+        return;
+      }
     }
 
     // Dome: victory advances sub-battle first; round only advances when the
