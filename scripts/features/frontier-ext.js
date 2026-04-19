@@ -32,19 +32,54 @@
   // SVG icons in the same style + size as the vanilla frontier-flair icons
   // (Battle Tower Eiffel, Factory gears). class="frontier-flair" must sit on
   // the <svg> element itself — styles.css line 5461 sizes it to 7rem × 7rem
-  // absolute-positioned; when the class is on a wrapper <span> the inner SVG
-  // stays at its intrinsic 32px size, which is why the first pass looked tiny.
-  const ICON_PALACE = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 2 2 9v2h28V9zm-11 12v12h2V14zm6 0v12h2V14zm6 0v12h2V14zm6 0v12h2V14zm-15 14v3h24v-3z"/></svg>`;
-  const ICON_DOJO = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M2 4c4 2 8 3 14 3s10-1 14-3v4c-4 1-8 2-14 2S6 9 2 8zm4 8v18h3V20h14v10h3V12h-3v6H9v-6zm3 6h12v-2H9z"/></svg>`;
-  const ICON_PIKE = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 3 2 28h28zm0 7 9 16H7zm-2 8 2 3 2-3-2 2zm-5 8h14v2H9z"/></svg>`;
-  const ICON_PYRAMID = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 2 2 30h28zM6 26l10-18 10 18zm3-1 7-12 7 12zm3-1 4-8 4 8z"/></svg>`;
-  const ICON_FACTORY_SECRET = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M3 13v16h10v-5l5 3v-6l5 3v-6l6 3V11zm14 8a3 3 0 1 1 0-6 3 3 0 0 1 0 6m-2 3h4v4h-4zm1-1v-1h2v1z"/></svg>`;
+  // absolute-positioned.
+  //
+  // Each SVG is hand-composed with rects / simple paths to avoid pixel drift
+  // when the 32px viewBox is scaled up to 7rem.
+  const ICON_TOWER = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M14 2h4v2h-4zm-1 3h6v3h-6zm-2 4h10v2h-10zm1 3h8v4h-8zm-1 5h10v3h-10zm-1 4h12v3h-12zm-1 4h14v3h-14zm-1 4h16v4h-16z"/></svg>`;
 
+  const ICON_PALACE = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 3 4 9h24zM3 10h26v2H3zm3 3h2v12H6zm6 0h2v12h-2zm6 0h2v12h-2zm6 0h2v12h-2zM4 26h24v2H4zm-1 3h26v2H3z"/></svg>`;
+
+  const ICON_ARENA = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M2 5c4 2 8 3 14 3s10-1 14-3v4c-4 2-8 3-14 3S6 11 2 9zm4 8h3v6h14v-6h3v17h-3V22H9v8H6zm3 6h14v-3H9z"/></svg>`;
+
+  const ICON_DOME = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 3a12 12 0 0 0-12 12v2h24v-2A12 12 0 0 0 16 3m-6 6 1-3 1 3zm5-1 1-3 1 3zm5 1 1-3 1 3zM3 18h26v3H3zm1 4h24v3H4zm-1 4h26v3H3z"/></svg>`;
+
+  const ICON_FACTORY = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M3 13v16h10v-5l5 3v-6l5 3v-6l6 3V11zm14 8a3 3 0 1 1 0-6 3 3 0 0 1 0 6m-2 3h4v5h-4zm1-2v-1h2v1z"/></svg>`;
+
+  const ICON_PIKE = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 3 2 29h28zm0 5 10 18H6zm-2 10 2 3 2-3-2 2zm-5 8h14v2H9z"/></svg>`;
+
+  const ICON_PYRAMID = `<svg class="frontier-flair" xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path fill="currentColor" d="M16 3 3 29h26zm0 5-9 16h18zm0 3-6 11h12zm0 3-3 6h6z"/></svg>`;
+
+  // 7 secret variants that mirror the 7 canonical Gen 3 Emerald facilities.
+  // Suffixed "(secrète)" / "(secret)" so they read as bonus-content companions
+  // to whatever vanilla Pokechill ships (Tour, Usine, Arène — different rules).
+  //
+  // All use backgrounds that already exist in img/bg/ so we don't have to ship
+  // new art with this feature.
   const FACILITIES = [
     {
-      id: "frontierPalace",
-      nameEn: "Battle Palace",
-      nameFr: "Palais de Combat",
+      id: "frontierTowerSecret",
+      nameEn: "Battle Tower (secret)",
+      nameFr: "Tour de Combat (secrète)",
+      descEn: "Trainer gauntlet — unlike the vanilla Tower's wild waves, this is a streak of fights against trainers. Pick your team and survive as long as you can.",
+      descFr: "Enchaînement de dresseurs — contrairement à la Tour classique (vagues sauvages), ici ce sont des combats 100% dresseurs. Compose ton équipe et tiens le plus longtemps.",
+      brain: {
+        id: "anabel",
+        sprite: "salon_maiden_anabel",
+        nameEn: "Salon Maiden Anabel",
+        nameFr: "Demoiselle du Salon Anabel",
+        teamSilver: ["alakazam", "entei", "snorlax"],
+        teamGold: ["raikou", "latios", "snorlax"],
+      },
+      iconSvg: ICON_TOWER,
+      background: "tower",
+      hueRotate: 200,
+      rules: { streak: true },
+    },
+    {
+      id: "frontierPalaceSecret",
+      nameEn: "Battle Palace (secret)",
+      nameFr: "Palais de Combat (secrète)",
       descEn: "Your Pokémon pick moves on their own, guided by their nature. No player input during attacks.",
       descFr: "Tes Pokémon choisissent leurs capacités seuls selon leur nature. Aucun contrôle pendant les attaques.",
       brain: {
@@ -56,31 +91,71 @@
         teamGold: ["crobat", "lapras", "slaking"],
       },
       iconSvg: ICON_PALACE,
+      background: "gym",
       hueRotate: 60,
       rules: { autoMoveByNature: true },
     },
     {
-      id: "frontierDojo",
-      nameEn: "Battle Arena",
-      nameFr: "Dojo de Combat",
+      id: "frontierArenaSecret",
+      nameEn: "Battle Arena (secret)",
+      nameFr: "Arène de Combat (secrète)",
       descEn: "3 turns max per battle. If neither side KOs, judges decide based on Mind / Skill / Body scores.",
       descFr: "3 tours max par combat. Si aucun K.O., le jury décide selon Esprit / Technique / Corps.",
       brain: {
         id: "greta",
         sprite: "arena_tycoon_greta",
         nameEn: "Arena Tycoon Greta",
-        nameFr: "Maîtresse du Dojo Gabrielle",
+        nameFr: "Maîtresse de l'Arène Gabrielle",
         teamSilver: ["heracross", "umbreon", "hariyama"],
         teamGold: ["hariyama", "shedinja", "medicham"],
       },
-      iconSvg: ICON_DOJO,
+      iconSvg: ICON_ARENA,
+      background: "lab",
       hueRotate: 0,
       rules: { threeTurnJudge: true },
     },
     {
-      id: "frontierPike",
-      nameEn: "Battle Pike",
-      nameFr: "Pic de Combat",
+      id: "frontierDomeSecret",
+      nameEn: "Battle Dome (secret)",
+      nameFr: "Dôme de Combat (secrète)",
+      descEn: "Single-elimination tournament — beat 4 trainers in a bracket per tour. You see each opponent's team ahead of time and pick 2 of your Pokémon.",
+      descFr: "Tournoi à élimination directe — bats 4 dresseurs en bracket par tour. Tu vois l'équipe de chaque adversaire à l'avance et choisis 2 de tes Pokémon.",
+      brain: {
+        id: "tucker",
+        sprite: "dome_ace_tucker",
+        nameEn: "Dome Ace Tucker",
+        nameFr: "As du Dôme Thierry",
+        teamSilver: ["salamence", "charizard", "swampert"],
+        teamGold: ["salamence", "metagross", "latias"],
+      },
+      iconSvg: ICON_DOME,
+      background: "town",
+      hueRotate: 320,
+      rules: { bracketTournament: true, bracketSize: 4, previewEnemy: true, pickSubset: 2 },
+    },
+    {
+      id: "frontierFactorySecret",
+      nameEn: "Battle Factory (secret)",
+      nameFr: "Usine de Combat (secrète)",
+      descEn: "Get 3 rental Pokémon from a random pool. After each win, you can swap one of yours with the defeated opponent's. Pure Gen 3 Factory rules.",
+      descFr: "Choisis 3 Pokémon de location dans un pool aléatoire. Après chaque victoire, tu peux échanger un des tiens avec un de l'adversaire. Règles Factory Gen 3 pures.",
+      brain: {
+        id: "noland",
+        sprite: "factory_head_noland",
+        nameEn: "Factory Head Noland",
+        nameFr: "Maître de l'Usine Philémon",
+        teamSilver: null, // Noland uses random rentals himself, like the player
+        teamGold: null,
+      },
+      iconSvg: ICON_FACTORY,
+      background: "cave",
+      hueRotate: 160,
+      rules: { rentalPool: true, swapAfterWin: true },
+    },
+    {
+      id: "frontierPikeSecret",
+      nameEn: "Battle Pike (secret)",
+      nameFr: "Pic de Combat (secrète)",
       descEn: "14 rooms. Pick one of three doors per room: battle, wild, heal, trap, or mystery. HP and status persist.",
       descFr: "14 salles. Choisis une des trois portes à chaque salle : combat, sauvage, soin, piège ou mystère. PV et statuts persistent.",
       brain: {
@@ -92,13 +167,14 @@
         teamGold: ["seviper", "gyarados", "milotic"],
       },
       iconSvg: ICON_PIKE,
+      background: "mountain",
       hueRotate: -40,
       rules: { chooseDoor: true, persistHpStatus: true, roomCount: 14 },
     },
     {
-      id: "frontierPyramid",
-      nameEn: "Battle Pyramid",
-      nameFr: "Pyramide de Combat",
+      id: "frontierPyramidSecret",
+      nameEn: "Battle Pyramid (secret)",
+      nameFr: "Pyramide de Combat (secrète)",
       descEn: "Navigate a 7x7 grid. Hidden trainers, wild waves, items, and traps. HP and status persist. Find the stairs to advance.",
       descFr: "Navigue une grille 7x7. Dresseurs cachés, vagues sauvages, objets et pièges. PV et statuts persistent. Trouve l'escalier pour avancer.",
       brain: {
@@ -110,26 +186,9 @@
         teamGold: ["articuno", "zapdos", "moltres"],
       },
       iconSvg: ICON_PYRAMID,
+      background: "desert",
       hueRotate: 30,
       rules: { gridNav: true, persistHpStatus: true, gridSize: 7 },
-    },
-    {
-      id: "frontierFactorySecret",
-      nameEn: "Hidden Factory",
-      nameFr: "Usine Secrète",
-      descEn: "Get 3 rental Pokémon from a random pool. After each win, swap one of yours with the defeated opponent's. Pure Gen 3 Factory rules.",
-      descFr: "Choisis 3 Pokémon de location dans un pool aléatoire. Après chaque victoire, tu peux échanger un des tiens avec un de l'adversaire. Règles Factory Gen 3 pures.",
-      brain: {
-        id: "noland",
-        sprite: "factory_head_noland",
-        nameEn: "Factory Head Noland",
-        nameFr: "Maître de l'Usine Philémon",
-        teamSilver: null,
-        teamGold: null,
-      },
-      iconSvg: ICON_FACTORY_SECRET,
-      hueRotate: 160,
-      rules: { rentalPool: true, swapAfterWin: true },
     },
   ];
 
@@ -288,6 +347,7 @@
         </span>
       </div>
       <div style="width: 8rem;" class="explore-ticket-right">
+        <span class="explore-ticket-bg" style="background-image: url(img/bg/${facility.background}.png);"></span>
         <img class="explore-ticket-sprite sprite-trim frontier-ext-brain-icon"
              style="z-index: 10;"
              src="img/trainers/${facility.brain.sprite}.png"
