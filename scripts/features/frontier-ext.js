@@ -6037,7 +6037,17 @@
       name: trainer.name,
       background: facility.background,
       sprite: trainer.sprite,
-      difficulty: trainer.tier ? trainer.tier * 10 + 20 : 40,
+      // `difficulty` is read by explore.js:531 as the enemy's HP MULTIPLIER
+      // (`hpMultiplier = areas[currentArea].difficulty`). The player's own
+      // hpMultiplier is 4 for trainer areas (teams.js:514). Anything above
+      // ~5-6 tilts fights heavily toward the NPC tank.
+      //   • Tier 1 : 4  (parity with player — round 1 feels fair)
+      //   • Tier 2 : 6
+      //   • Tier 3 : 8
+      //   • Tier 4 : 10
+      //   • Tier 5 : 12 (endgame, 3× player HP pool)
+      // Post-Gold rematches add via the multiplier field separately.
+      difficulty: (trainer.tier ? trainer.tier * 2 + 2 : 4),
       trainer: true,
       type: "vs",
       level: 100,
