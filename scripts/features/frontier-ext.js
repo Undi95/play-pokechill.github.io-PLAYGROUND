@@ -259,26 +259,44 @@
   //     6 / 8+ very strong, 49+ brutal.
   //   • Sprites drawn from the 100+ available in img/trainers/ so the pool
   //     feels populated.
-  const GENERIC_TRAINER_SPRITES = [
-    "aaron","aceTrainerSnowF","aceTrainerSnowM","alder","archie","aromaLady",
-    "artist","battlegirl","beauty","bertha","birdkeeper","blackBelt","blaine",
-    "blue","brendan","brock","bruno","bugCatcher","burgh","candice","channeler",
-    "clay","colress","crispin","cynthia","cyrus","dawn","diantha","drake",
-    "erika","firebreather","flint","geeta","grimsley","hiker","iris","janine",
-    "juan","karen","koga","lance","leaf","lorelei","lt_surge","maylene","may",
-    "misty","morty","norman","phoebe","pokebreeder","pokemaniac","red","roark",
-    "roxanne","roxie","sabrina","silver","skyla","swimmer","wallace","whitney",
-    "winona","youngster",
+  // Generic role-based sprites only — no iconic / named trainers (Cynthia,
+  // Lance, Red, etc.) because their PNGs carry their own identity and pairing
+  // them with random names breaks immersion. Bosses keep their canonical
+  // sprite via `facility.brain.sprite`, generics are reserved for rounds 1-6.
+  // Every filename below verified present in img/trainers/ (tree listed
+  // against ls(img/trainers/)).
+  const GENERIC_SPRITES_M = [
+    "aceTrainerSnowM","birdkeeper","blackBelt","bugCatcher","firebreather",
+    "gentleman","hiker","hiker2","pokemaniac","rocketGruntM","sailor",
+    "worker","youngster",
   ];
-  const TRAINER_NAMES_FR = [
-    "Jean-Baptiste","Léa","Hugo","Océane","Mathis","Zoé","Alexandre","Emma",
-    "Tristan","Camille","Raphaël","Chloé","Nicolas","Sarah","Arthur","Juliette",
-    "Lucas","Manon","Gabriel","Inès","Noah","Louna","Elias","Jade",
+  const GENERIC_SPRITES_F = [
+    "aceTrainerSnowF","aromaLady","battlegirl","beauty","hexmaniac",
+    "madame","rocketGruntF",
   ];
-  const TRAINER_NAMES_EN = [
-    "Jake","Lilly","Hugh","Olivia","Max","Zoe","Alex","Emma","Trent","Cam",
-    "Rafe","Chloe","Nick","Sarah","Arthur","Julie","Luke","Mandy","Gabe","Ines",
-    "Noah","Luna","Eli","Jade",
+  const GENERIC_SPRITES_N = [
+    // ambiguous / could be either gender — name is picked from M or F list at random
+    "artist","channeler","clown","janitor","psychic","schoolKid","scientist",
+    "swimmer","veteran",
+  ];
+  const TRAINER_NAMES_FR_M = [
+    "Jean-Baptiste","Hugo","Mathis","Alexandre","Tristan","Raphaël","Nicolas",
+    "Arthur","Lucas","Gabriel","Noah","Elias","Maxime","Julien","Antoine",
+    "Baptiste","Victor","Clément","Théo","Paul",
+  ];
+  const TRAINER_NAMES_FR_F = [
+    "Léa","Océane","Zoé","Emma","Camille","Chloé","Sarah","Juliette","Manon",
+    "Inès","Louna","Jade","Alice","Lucie","Élise","Marion","Noémie","Clara",
+    "Sophie","Anaïs",
+  ];
+  const TRAINER_NAMES_EN_M = [
+    "Jake","Hugh","Max","Alex","Trent","Cam","Rafe","Nick","Arthur","Luke",
+    "Gabe","Noah","Eli","Mark","Jason","Sam","Victor","Leo","Theo","Paul",
+  ];
+  const TRAINER_NAMES_EN_F = [
+    "Lilly","Olivia","Zoe","Emma","Chloe","Sarah","Julie","Mandy","Ines",
+    "Luna","Jade","Alice","Lucy","Ellie","Mary","Noemi","Clara","Sophie",
+    "Anna","Ivy",
   ];
 
   // Pokémon pool for non-boss trainers, tagged by difficulty tier. Tier grows
@@ -379,17 +397,38 @@
     return chosen.slice(0, 4);
   }
 
+  // Pick a sprite + a gender-matching name. Neutral sprites get a random
+  // pick from either name pool so we don't accidentally pair e.g. a
+  // "beauty" sprite with "Gabriel" or a "blackBelt" sprite with "Lucie".
+  function pickSpriteAndName(lang) {
+    const roll = Math.random();
+    let gender, sprite;
+    if (roll < 0.4) {
+      gender = "M";
+      sprite = GENERIC_SPRITES_M[Math.floor(Math.random() * GENERIC_SPRITES_M.length)];
+    } else if (roll < 0.8) {
+      gender = "F";
+      sprite = GENERIC_SPRITES_F[Math.floor(Math.random() * GENERIC_SPRITES_F.length)];
+    } else {
+      // Neutral sprite — randomize name gender
+      gender = Math.random() < 0.5 ? "M" : "F";
+      sprite = GENERIC_SPRITES_N[Math.floor(Math.random() * GENERIC_SPRITES_N.length)];
+    }
+    const nameList = lang === "fr"
+      ? (gender === "M" ? TRAINER_NAMES_FR_M : TRAINER_NAMES_FR_F)
+      : (gender === "M" ? TRAINER_NAMES_EN_M : TRAINER_NAMES_EN_F);
+    const name = nameList[Math.floor(Math.random() * nameList.length)];
+    return { sprite, name, gender };
+  }
+
   function generateTrainer(round, facility) {
     const lang = window.gameLang === "fr" ? "fr" : "en";
-    const nameList = lang === "fr" ? TRAINER_NAMES_FR : TRAINER_NAMES_EN;
-    const name = nameList[Math.floor(Math.random() * nameList.length)];
-    const sprite = GENERIC_TRAINER_SPRITES[Math.floor(Math.random() * GENERIC_TRAINER_SPRITES.length)];
+    const { sprite, name } = pickSpriteAndName(lang);
 
     // Round-based tier scaling
     let tier = 1;
     if (round >= 3) tier = 2;
     if (round >= 6) tier = 3;
-    if (round >= 20) tier = 3;
 
     const slots = [1, 2, 3].map(() => {
       const id = pickFromPool(tier);
