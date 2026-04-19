@@ -251,7 +251,9 @@
 
   // Per-facility accessors. Bulbapedia thresholds live on each facility
   // definition (silverRound / goldRound). `postGoldRematchEvery` is our
-  // custom extension and defaults to POST_GOLD_BOSS_EVERY.
+  // custom extension — defaults to (gold - silver) so each facility keeps
+  // the same natural cadence it used between Silver and Gold. E.g. Tour
+  // (silver 5, gold 10) → bosses reappear every 5 rounds (15/20/25).
   function silverRoundFor(facility) {
     return (facility && facility.silverRound) || SILVER_ROUND;
   }
@@ -259,7 +261,30 @@
     return (facility && facility.goldRound) || GOLD_ROUND;
   }
   function postGoldEveryFor(facility) {
-    return (facility && facility.postGoldRematchEvery) || POST_GOLD_BOSS_EVERY;
+    if (facility && facility.postGoldRematchEvery) return facility.postGoldRematchEvery;
+    const silver = silverRoundFor(facility);
+    const gold = goldRoundFor(facility);
+    const gap = gold - silver;
+    return gap > 0 ? gap : POST_GOLD_BOSS_EVERY;
+  }
+
+  // "Next meaningful round" for a given currentRound — i.e. the closest
+  // upcoming boss round >= currentRound. Drives the "Round X / Y" badge
+  // denominator (previously frozen at silverRound, which became nonsense
+  // once the player passed Silver — e.g. Tour at round 16 was showing
+  // "16/5" because silver=5 never changed). Values:
+  //   • currentRound <= silver  → returns silver
+  //   • currentRound <= gold    → returns gold
+  //   • currentRound > gold     → next rematch round (gold + k·every)
+  function nextGoalRoundFor(currentRound, facility) {
+    const silver = silverRoundFor(facility);
+    const gold = goldRoundFor(facility);
+    const every = postGoldEveryFor(facility);
+    if (currentRound <= silver) return silver;
+    if (currentRound <= gold) return gold;
+    const past = currentRound - gold;
+    const cycles = Math.max(1, Math.ceil(past / every));
+    return gold + cycles * every;
   }
 
   // Difficulty multiplier — 1 up to Gold, then +1 per post-Gold cycle.
@@ -285,6 +310,89 @@
     return null;
   }
 
+  // ─── 2a. UNIFIED DIFFICULTY COMPUTATION ───────────────────────────────────
+  // Single source of truth for "how hard is round N in facility F?". Replaces
+  // the tier curves previously duplicated in generateTrainer and
+  // generateFactoryRentalPool, and feeds the new per-round crescendo for IVs,
+  // abilities, and move quality (Emerald-style progressive Frontier feel).
+  //
+  // Returns: {
+  //   tier,              // 1..5 pool bracket (pure BST percentile)
+  //   mult,              // post-Gold rematch multiplier (1, 2, 3, ...)
+  //   hpMult,            // area.difficulty (enemy HP pool multiplier)
+  //   ivRating,          // 0..6 enemy IV for every stat
+  //   abilityChance,     // 0..1 probability of overriding with a random ability
+  //   forceHiddenAbility,// bool — enemies always use hidden ability if present
+  //   useEggMove,        // bool — enemies include their eggMove in the pool
+  //   forceSignature,    // bool — force signature move in slot 1 if species has one
+  //   useSeededRng,      // bool — call learnPkmnMoveSeeded for reproducibility
+  // }
+  //
+  // IV curve: 0 → 6 linear from round 1 to goldRound, then 6 forever.
+  //   • Tour (gold 10): IV ≈ round * 0.6
+  //   • Pic  (gold 5) : IV ≈ round * 1.2
+  // Hidden ability kicks in from silverRound+1, forced from goldRound.
+  // Egg moves / signature start at silverRound.
+  function computeRunDifficulty(round, facility) {
+    const silver = silverRoundFor(facility);
+    const gold = goldRoundFor(facility);
+    const mult = difficultyMultiplier(round, facility);
+    const tier = tierForRound(round, facility);
+
+    // IV ramps from 0 (round 1) to 6 (round gold), caps at 6 post-Gold.
+    const progress = Math.min(1, Math.max(0, (round - 1) / Math.max(1, gold - 1)));
+    let ivRating = Math.round(progress * 6);
+    if (round >= gold) ivRating = 6;
+
+    // Ability override chance grows with round; forced at gold+, always
+    // hidden ability post-Gold rematches (mult >= 2).
+    let abilityChance = 0;
+    if (round >= 3) abilityChance = 0.25;
+    if (round >= silver) abilityChance = 0.55;
+    if (round >= gold) abilityChance = 1;
+    const forceHiddenAbility = mult >= 2 || round >= gold;
+
+    // Move quality knobs — egg moves & signature kick in at Silver, always
+    // forced at Gold+ so boss mons feel unique.
+    const useEggMove = round >= silver;
+    const forceSignature = round >= gold;
+    // Use seeded RNG for enemies from Silver onwards so the same round
+    // replays with a consistent (but varied-between-rounds) feel. Before
+    // Silver we stay fully random for early-round variety.
+    const useSeededRng = round >= silver;
+
+    // HP multiplier: base tier curve (4/6/8/10/12) + 2 per post-Gold level.
+    const hpMult = tier * 2 + 2 + (mult - 1) * 2;
+
+    return {
+      round,
+      tier,
+      mult,
+      hpMult,
+      ivRating,
+      abilityChance,
+      forceHiddenAbility,
+      useEggMove,
+      forceSignature,
+      useSeededRng,
+    };
+  }
+
+  // Shared tier-from-round calculator. Previously duplicated in
+  // generateTrainer (1070) and generateFactoryRentalPool (4018). Consolidated
+  // here so the BST pool used by trainers, rentals, brain fallback teams,
+  // and any future path always reads the same curve.
+  function tierForRound(round, facility) {
+    const gold = goldRoundFor(facility);
+    const mult = difficultyMultiplier(round, facility);
+    let tier = 1;
+    if (round >= 3) tier = 2;
+    if (round >= 6) tier = 3;
+    if (round > gold) tier = 4;
+    if (mult >= 3) tier = 5;
+    return tier;
+  }
+
   // ─── 2b1. PIKE CONSTANTS ──────────────────────────────────────────────────
   // Battle Pike (Gen 3 Emerald): each round is a dungeon of 14 rooms. Player
   // picks 1 of 3 curtain-doors per room — the outcome is only revealed after
@@ -307,6 +415,10 @@
 
   function isPikeFacility(facility) {
     return facility && facility.rules && facility.rules.chooseDoor;
+  }
+
+  function isPalaceFacility(facility) {
+    return !!(facility && facility.rules && facility.rules.autoMoveByNature);
   }
 
   // Any facility whose rules opt into `persistHpStatus` reuses the Pike
@@ -447,6 +559,7 @@
     }
     const lang = window.gameLang === "fr" ? "fr" : "en";
     const bossInfo = getBossRoundInfo(currentRound, facility);
+    const brainDiff = computeRunDifficulty(currentRound, facility);
     const trainers = [];
     for (let i = 1; i <= DOME_BRACKET_SIZE; i++) {
       if (i === DOME_BRACKET_SIZE && bossInfo) {
@@ -461,12 +574,12 @@
           team: brainTeam
             ? brainTeam.slice(0, 3).map((id) => ({
                 id,
-                moves: pickMovesetFor(id),
+                moves: pickMovesetFor(id, brainDiff),
                 nature: simulateNatureFor(id),
               }))
             : [1, 2, 3].map(() => {
                 const id = pickFromPool(5);
-                return { id, moves: pickMovesetFor(id), nature: simulateNatureFor(id) };
+                return { id, moves: pickMovesetFor(id, brainDiff), nature: simulateNatureFor(id) };
               }),
           tier: 3,
           multiplier: bossInfo.multiplier,
@@ -720,6 +833,16 @@
   //               a tutorial instead of a wall. Opens up to the full
   //               tier from round 4 onward, with the tier itself bumping
   //               naturally at rounds 3 / 6 / gold (see generateTrainer).
+  //   • Pike    : 70% mons with Poison/Ghost/Psychic typing — matches the
+  //               "status-heavy traps" identity of Emerald's Pike (Seviper,
+  //               Shuckle, Milotic roster + poison/burn door effects).
+  //   • Pyramid : 70% mons with Ghost/Rock/Ground/Dark typing — matches
+  //               Brandon's regi+legendary bird roster and the dungeon's
+  //               cramped-cave feel.
+  //   • Palace  : bias toward Pokémon with strong offensive bias (large
+  //               atk/satk gap) so simulateNatureFor yields decisive
+  //               natures → Palace's nature-gated move selection feels
+  //               meaningfully different from a random pool.
   //
   // Returns the raw tier pool as fallback if narrowing would empty it.
   function getPoolForFacility(facility, tier, round) {
@@ -735,7 +858,57 @@
                      .map((e) => e.id);
       }
     }
+    if (isPikeFacility(facility)) pool = themeBiasPool(pool, ["poison", "ghost", "psychic"], 0.7);
+    else if (isPyramidFacility(facility)) pool = themeBiasPool(pool, ["ghost", "rock", "ground", "dark"], 0.7);
+    else if (isPalaceFacility(facility)) pool = palaceBiasPool(pool);
     return pool.length ? pool : getPool(tier);
+  }
+
+  // 70/30 type-themed pool: returns a list that is ~`ratio` themed IDs +
+  // the rest from the general pool. Uses concatenation so Math.random()
+  // natively hits the themed side ~ratio of the time. If not enough
+  // themed mons exist, falls back to the raw pool (caller's `|| getPool`
+  // safety net guarantees we never return empty).
+  function themeBiasPool(ids, themeTypes, ratio) {
+    if (typeof pkmn === "undefined" || !Array.isArray(ids) || ids.length < 8) return ids;
+    const set = new Set(themeTypes);
+    const themed = [];
+    const rest = [];
+    for (const id of ids) {
+      const p = pkmn[id];
+      if (!p) continue;
+      const types = Array.isArray(p.type) ? p.type : [p.type];
+      if (types.some((t) => set.has(t))) themed.push(id);
+      else rest.push(id);
+    }
+    if (themed.length < 4) return ids; // not enough themed mons; skip bias
+    // Duplicate themed IDs to bias random picks toward the theme without
+    // excluding the rest of the tier entirely.
+    const themedWeight = Math.ceil((themed.length / (1 - ratio)) - themed.length);
+    const biased = [];
+    for (let i = 0; i < themedWeight; i++) biased.push(...themed);
+    biased.push(...rest);
+    return biased.length ? biased : ids;
+  }
+
+  // Palace bias: Emerald's Palace rule picks an opponent's move based on
+  // nature (cool/beauty/tough/etc.). The Pokechill overlay proxies that
+  // via simulateNatureFor which returns a NON-neutral nature only when a
+  // mon has a clear offensive/defensive lean. A pool of stat-ambiguous
+  // mons would all default to "" (neutral) → the rule stops mattering.
+  // Keep the ~60% of the pool with a large atk/satk gap or obvious bulk
+  // → the Palace fight always has a dominant playstyle on the NPC side.
+  function palaceBiasPool(ids) {
+    if (typeof pkmn === "undefined" || !Array.isArray(ids) || ids.length < 8) return ids;
+    const expressive = ids.filter((id) => {
+      const p = pkmn[id];
+      if (!p || !p.bst) return false;
+      const { atk, satk, def, sdef, hp } = p.bst;
+      const offGap = Math.abs((atk || 0) - (satk || 0));
+      const defGap = Math.abs((def || 0) - (sdef || 0));
+      return offGap >= 25 || defGap >= 25 || hp + def + sdef >= 260;
+    });
+    return expressive.length >= 6 ? expressive : ids;
   }
 
   // Build a strategic 4-move set for a Pokémon. Goals:
@@ -781,7 +954,14 @@
   // natural moveset PLUS the curated GENETIC_MOVES_FOR_ALL set above —
   // they can still have common egg moves like Dragon Dance, Ice Beam,
   // Extreme Speed etc., even when their type doesn't natively cover it.
-  function pickMovesetFor(pkmnId) {
+  //
+  // `diff` (optional) = computeRunDifficulty result. When present it unlocks:
+  //   • eggMove inclusion (useEggMove)       → wider coverage at Silver+
+  //   • forced signature in slot 1            → boss mons keep their identity
+  //   • (future) level-dependent move quality floor
+  // When omitted, the function behaves exactly like before — keeps backward
+  // compatibility with callers in the bracket/Pike preview paths.
+  function pickMovesetFor(pkmnId, diff) {
     const p = typeof pkmn !== "undefined" ? pkmn[pkmnId] : null;
     if (!p || typeof move === "undefined") return [];
     const types = Array.isArray(p.type) ? p.type : [p.type];
@@ -796,6 +976,12 @@
     } catch (e) { /* keep default */ }
     const unrestrictedLearning = (division === "B" || division === "C" || division === "D");
 
+    // Egg move ID, if this species has one. At Silver+ we always let it
+    // into the learnable pool even for A/S division (canonically egg moves
+    // ARE the way restricted species get their spicy coverage).
+    const eggMoveKey = (diff && diff.useEggMove && p.eggMove && p.eggMove.id)
+      ? p.eggMove.id : null;
+
     // Natural learnable filter (only applied if division A/S):
     const isLearnableNatural = (mv) => {
       if (!mv || !Array.isArray(mv.moveset)) return false;
@@ -808,7 +994,9 @@
     };
     // A / S division also unlock the curated genetic pool.
     const isLearnable = (mv, key) => {
-      if (!mv || !Array.isArray(mv.moveset)) return false;
+      if (!mv) return false;
+      if (key && eggMoveKey && key === eggMoveKey) return true; // egg move always in
+      if (!Array.isArray(mv.moveset)) return false;
       if (unrestrictedLearning) return true; // B or lower → any move
       if (isLearnableNatural(mv)) return true;
       // A / S → curated genetic moves on top of natural.
@@ -920,12 +1108,21 @@
     // Each pick uses pickTopN with a small N (3-5) so two similar
     // Pokémon don't end up with identical movesets.
 
-    // Slot 1 — signature FIRST if power decent (makes sig mons feel unique)
-    if (p.signature && p.signature.power >= 65) push(p.signature);
+    // Slot 1 — signature FIRST if power decent, OR if the difficulty tier
+    // forces it (Gold round / post-Gold rematch → boss-caliber mons keep
+    // their identity move even when its raw BP is mediocre).
+    const forceSig = diff && diff.forceSignature && p.signature;
+    if (p.signature && (p.signature.power >= 65 || forceSig)) push(p.signature);
     else {
       const s1 = pickTopN(stabPrimary, 3);
       if (s1) push(s1.id);
     }
+
+    // Egg move — if the species has one and we're at Silver+, ensure it
+    // lands in the set. It bypasses the utility/flavour slots and slots
+    // itself in whichever spare slot exists. This is the primary way
+    // restricted-division mons get interesting coverage at higher rounds.
+    if (eggMoveKey && move[eggMoveKey]) push(eggMoveKey);
 
     // Slot 2 — secondary STAB > coverage
     if (secondaryType && stabSecondary.length) {
@@ -1065,25 +1262,28 @@
     const lang = window.gameLang === "fr" ? "fr" : "en";
     const { sprite, name } = pickSpriteAndName(lang);
 
-    const mult = difficultyMultiplier(round, facility);
-    const gold = goldRoundFor(facility);
-    let tier = 1;
-    if (round >= 3) tier = 2;
-    if (round >= 6) tier = 3;
-    if (round > gold) tier = 4;
-    if (mult >= 3) tier = 5;
+    const diff = computeRunDifficulty(round, facility);
+    const { tier, mult } = diff;
 
     // Every facility's NPC brings 3 Pokémon. Dôme picks 2 to actually
     // fight at match-time (see openDomePokemonSelection). The facility
     // pool helper unifies Arena speed-bias + Factory early-round
-    // crescendo; other facilities just get the raw tier pool.
+    // crescendo + per-facility theme bias.
     const arenaBias = isArenaFacility(facility);
     const pool = getPoolForFacility(facility, tier, round);
     const size = 3;
     const slots = [];
+    const usedIds = new Set(); // no-duplicate-species guard per trainer
     for (let i = 0; i < size; i++) {
-      const id = pool[Math.floor(Math.random() * pool.length)] || pickFromPool(tier);
-      const moves = pickMovesetFor(id);
+      let id;
+      let safety = 0;
+      do {
+        id = pool[Math.floor(Math.random() * pool.length)] || pickFromPool(tier);
+        safety++;
+      } while (id && usedIds.has(id) && safety < 20 && pool.length > size);
+      if (!id) id = pickFromPool(tier);
+      usedIds.add(id);
+      const moves = pickMovesetFor(id, diff);
       let nature = simulateNatureFor(id);
       if (arenaBias) nature = arenaBiasNature(nature);
       slots.push({ id, moves, nature });
@@ -1181,14 +1381,73 @@
         font-size: 0.85rem;
         margin-right: 0.2rem;
       }
+      /* Medals: the tile wrapper applies filter:hue-rotate(var(--hue)) to
+         tint the whole facility card. Silver/gold metallic gradients need
+         their true colours preserved, so we counter-rotate here (same
+         trick the brain sprite uses). The 1.25em font-size + gradient
+         text clip creates a metallic "struck medal" feel, and the ::after
+         pseudo-element runs a diagonal shine that loops every 3s. */
       .frontier-ext-symbol {
         display: inline-block;
-        font-size: 1.1rem;
-        margin: 0 0.1rem;
+        font-size: 1.25rem;
+        line-height: 1;
+        margin: 0 0.15rem;
+        position: relative;
+        filter: hue-rotate(calc(var(--hue, 0deg) * -1));
       }
-      .frontier-ext-symbol.silver { color: #c0c0c0; text-shadow: 0 0 3px #888; }
-      .frontier-ext-symbol.gold   { color: #ffd700; text-shadow: 0 0 3px #b8860b; }
+      .frontier-ext-symbol.silver,
+      .frontier-ext-symbol.gold {
+        background-clip: text;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        color: transparent;
+        text-shadow: none;
+      }
+      .frontier-ext-symbol.silver {
+        background-image: linear-gradient(135deg,
+          #fafafa 0%, #e8e8e8 20%, #bcbcbc 45%,
+          #a8a8a8 60%, #d6d6d6 80%, #fafafa 100%);
+        drop-shadow: 0 0 3px rgba(200,200,200,0.8);
+        filter: hue-rotate(calc(var(--hue, 0deg) * -1))
+                drop-shadow(0 0 2px rgba(220,220,220,0.6));
+      }
+      .frontier-ext-symbol.gold {
+        background-image: linear-gradient(135deg,
+          #fff4c0 0%, #ffd966 18%, #e8a93a 40%,
+          #c78a1a 58%, #f2c94c 78%, #fff4c0 100%);
+        filter: hue-rotate(calc(var(--hue, 0deg) * -1))
+                drop-shadow(0 0 3px rgba(255,200,70,0.7));
+      }
       .frontier-ext-symbol.locked { color: #2a2a2a; }
+      /* Shine sweep — thin highlight diagonally wiping across the medal.
+         Only active on unlocked medals (silver/gold) so locked dots stay
+         flat. Uses mask-image on a wider gradient than the medal itself
+         so the animation cleanly enters/exits. */
+      .frontier-ext-symbol.silver::after,
+      .frontier-ext-symbol.gold::after {
+        content: "";
+        position: absolute;
+        inset: -10% -25%;
+        pointer-events: none;
+        background: linear-gradient(115deg,
+          transparent 35%,
+          rgba(255,255,255,0.95) 48%,
+          rgba(255,255,255,0.4) 52%,
+          transparent 65%);
+        mix-blend-mode: screen;
+        mask-image: radial-gradient(circle at 50% 50%, #000 55%, transparent 75%);
+        -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 55%, transparent 75%);
+        animation: frontierMedalShine 3.2s ease-in-out infinite;
+        opacity: 0.8;
+      }
+      .frontier-ext-symbol.gold::after { animation-delay: 1.1s; opacity: 0.9; }
+      @keyframes frontierMedalShine {
+        0%, 100% { transform: translateX(-140%); opacity: 0; }
+        40%      { opacity: 0.9; }
+        50%      { transform: translateX(0%);    opacity: 0.9; }
+        60%      { opacity: 0.9; }
+        85%      { transform: translateX(140%);  opacity: 0; }
+      }
       /* Right-click help rule grid inside the tooltip. Colours picked to
          contrast with the game's beige/tan tooltipBottom background (light1)
          — bright orange on beige was unreadable, dark brown/red works. */
@@ -2286,7 +2545,7 @@
     const isRunHere = activeRun && activeRun.facilityId === facility.id;
     const inProgressLabel = lang === "fr" ? "EN COURS" : "IN PROGRESS";
     const inProgressTag = isRunHere
-      ? `<span class="frontier-ext-inprogress-tag" title="Run ${activeRun.round + 1}/${silverRoundFor(facility)}">● ${inProgressLabel}</span>`
+      ? `<span class="frontier-ext-inprogress-tag" title="Run ${activeRun.round + 1}/${nextGoalRoundFor(activeRun.round + 1, facility)}">● ${inProgressLabel}</span>`
       : "";
 
     const tile = document.createElement("div");
@@ -2533,7 +2792,7 @@
           // round counter hasn't ticked over yet (7 battles = 1 round).
           battleStr = ` · ${lang === "fr" ? "Combat" : "Battle"} ${run.battleInRound || 1}/${perRound}`;
         }
-        html += `<strong>${t.inProgress}</strong> — ${t.round} ${run.round + 1}/${silverRoundFor(facility)}${battleStr}`;
+        html += `<strong>${t.inProgress}</strong> — ${t.round} ${run.round + 1}/${nextGoalRoundFor(run.round + 1, facility)}${battleStr}`;
       } else {
         html += `${lang === "fr" ? facility.descFr : facility.descEn}`;
       }
@@ -3028,19 +3287,22 @@
       || (!!trainer.isBoss) !== (isSilverBoss || isGoldBoss);
     if (trainerStale) {
       if (isSilverBoss || isGoldBoss) {
+        const brainDiff = computeRunDifficulty(nextRound, facility);
         const brainTeam = isSilverBoss ? facility.brain.teamSilver : facility.brain.teamGold;
         trainer = {
           name: lang === "fr" ? facility.brain.nameFr : facility.brain.nameEn,
           sprite: facility.brain.sprite,
           team: brainTeam
-            ? brainTeam.map((id) => ({ id, moves: pickMovesetFor(id) }))
+            ? brainTeam.map((id) => ({ id, moves: pickMovesetFor(id, brainDiff) }))
             : [1, 2, 3].map(() => {
                 const id = pickFromPool(3);
-                return { id, moves: pickMovesetFor(id) };
+                return { id, moves: pickMovesetFor(id, brainDiff) };
               }),
           isBoss: true,
           facilityId: facility.id,
           round: nextRound,
+          tier: brainDiff.tier,
+          multiplier: brainDiff.mult,
         };
       } else {
         trainer = generateTrainer(nextRound, facility);
@@ -3062,6 +3324,7 @@
       const rentalIds = new Set(run.factoryTeam.map((r) => r.id));
       const tierForPool = trainer.tier || 1;
       const poolForReroll = getPoolForFacility(facility, tierForPool, nextRound);
+      const rerollDiff = computeRunDifficulty(nextRound, facility);
       let safety = 0;
       for (let i = 0; i < trainer.team.length; i++) {
         while (rentalIds.has(trainer.team[i].id) && safety < 50) {
@@ -3071,7 +3334,7 @@
           if (!newId || rentalIds.has(newId)) continue;
           trainer.team[i] = {
             id: newId,
-            moves: pickMovesetFor(newId),
+            moves: pickMovesetFor(newId, rerollDiff),
             nature: trainer.team[i].nature || simulateNatureFor(newId),
           };
         }
@@ -3278,6 +3541,11 @@
         // Factory: restore original preview slot + move overrides BEFORE
         // clearing activeRun, otherwise we lose the stash reference.
         if (isFactoryFacility(facility)) cleanupFactoryRun(run);
+        // Restore enemy IV/ability overrides (non-Factory). Usually the
+        // exitCombat hook already did this, but abandon from between
+        // rounds never enters combat — defensive restore here so the
+        // pkmn dict never leaks a Frontier override into the main game.
+        try { restoreEnemyRuntimeStats(run); } catch (e) { /* ignore */ }
         if (isPyramidFacility(facility)) {
           try { setPyramidModalSizing(false); } catch (e) { /* ignore */ }
           run.pyramid = null;
@@ -4013,13 +4281,8 @@
   // means the user can never "get lucky" on a species they've trained
   // to S-tier IVs; rentals are always freshly rolled stat blocks.
   function generateFactoryRentalPool(facility, round) {
-    const mult = difficultyMultiplier(round, facility);
-    const gold = goldRoundFor(facility);
-    let tier = 1;
-    if (round >= 3) tier = 2;
-    if (round >= 6) tier = 3;
-    if (round > gold) tier = 4;
-    if (mult >= 3) tier = 5;
+    const diff = computeRunDifficulty(round, facility);
+    const { tier } = diff;
 
     const pool = getPoolForFacility(facility, tier, round);
 
@@ -4033,7 +4296,7 @@
       used.add(id);
       rentals.push({
         id,
-        moves: pickMovesetFor(id),
+        moves: pickMovesetFor(id, diff),
         nature: FACTORY_RENTAL_NATURES[Math.floor(Math.random() * FACTORY_RENTAL_NATURES.length)],
         ivs: rollFactoryIvs(),
         ability: rollFactoryAbility(id),
@@ -4084,6 +4347,71 @@
       pkmn[id].ability = orig.ability;
     }
     run.factoryOriginalState = {};
+  }
+
+  // ─── ENEMY RUNTIME STATS (non-Factory crescendo) ──────────────────────────
+  // Same stash/restore pattern as the Factory's applyFactoryMoves, but
+  // targeted at ENEMY-only species on any facility. Called from
+  // buildEphemeralRunArea to inject:
+  //   • IVs scaled by `diff.ivRating` (0..6 crescendo; see computeRunDifficulty)
+  //   • Ability override (random learnPkmnAbility pick, or hidden ability
+  //     when forceHiddenAbility is set) with probability `diff.abilityChance`
+  //
+  // Caveat — vanilla combat reads `pkmn[id]` for BOTH sides, so if the
+  // enemy's species overlaps with one the player brought, the player's own
+  // mon temporarily gains the enemy IV/ability too. This mirrors what
+  // applyFactoryMoves already does for rentals and is accepted as the
+  // Emerald "Frontier stat cap" feel.
+  //
+  // `trainer.team` = [{ id, moves, nature, ... }, ...]
+  function applyEnemyRuntimeStats(run, trainer, diff) {
+    if (!run || !trainer || !diff) return;
+    if (typeof pkmn === "undefined") return;
+    // Belt & braces: if a previous combat's overrides were never cleaned
+    // up (e.g. exitCombat hook skipped due to a mid-battle crash), restore
+    // first so we don't compound stashes across combats.
+    if (run.enemyRuntimeState && Object.keys(run.enemyRuntimeState).length) {
+      restoreEnemyRuntimeStats(run);
+    }
+    run.enemyRuntimeState = {};
+    const team = Array.isArray(trainer.team) ? trainer.team : [];
+    const ivVal = Math.max(0, Math.min(6, diff.ivRating | 0));
+    for (const slot of team) {
+      if (!slot || !slot.id) continue;
+      const p = pkmn[slot.id];
+      if (!p) continue;
+      if (!run.enemyRuntimeState[slot.id]) {
+        run.enemyRuntimeState[slot.id] = {
+          ivs: p.ivs ? { ...p.ivs } : undefined,
+          ability: p.ability,
+        };
+      }
+      p.ivs = { hp: ivVal, atk: ivVal, def: ivVal, satk: ivVal, sdef: ivVal, spe: ivVal };
+
+      // Ability roll. forceHiddenAbility wins if the species has a hidden
+      // ability defined; else probabilistic `learnPkmnAbility` pick.
+      const wantHidden = diff.forceHiddenAbility && p.hiddenAbility && p.hiddenAbility.id;
+      const rollAbility = !wantHidden && diff.abilityChance > 0
+        && Math.random() < diff.abilityChance;
+      if (wantHidden) {
+        p.ability = p.hiddenAbility.id;
+      } else if (rollAbility && typeof learnPkmnAbility === "function") {
+        try {
+          const picked = learnPkmnAbility(slot.id, 1 + (diff.mult - 1));
+          if (picked) p.ability = picked;
+        } catch (e) { /* keep original ability */ }
+      }
+    }
+  }
+
+  function restoreEnemyRuntimeStats(run) {
+    if (!run || !run.enemyRuntimeState || typeof pkmn === "undefined") return;
+    for (const [id, orig] of Object.entries(run.enemyRuntimeState)) {
+      if (!pkmn[id]) continue;
+      pkmn[id].ivs = orig.ivs;
+      pkmn[id].ability = orig.ability;
+    }
+    run.enemyRuntimeState = {};
   }
 
   // Switch the active previewTeam slot to the private Factory slot so
@@ -6434,6 +6762,24 @@
       effectiveTeam = indices.map((i) => trainer.team[i]);
     }
 
+    // Unified difficulty spec — computed once per combat, drives HP mult,
+    // IV injection, and ability overrides. Uses run.round+1 since the
+    // vanilla streak counter only advances post-victory (onRunVictory).
+    const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
+    const thisRound = (run && run.round ? run.round : 0) + 1;
+    const diff = computeRunDifficulty(thisRound, facility);
+
+    // Apply enemy runtime stat overrides (IVs + ability) to the Pokémon in
+    // the effective team. Non-Factory only — Factory already controls
+    // pkmn[id].ivs/ability via applyFactoryMoves on the RENTAL side (which
+    // the player uses). If we also rewrote enemy state there, we'd clobber
+    // rental IVs on species overlap. The Factory trainer dedupe at
+    // openSimulatedFight already guarantees enemy/rental species don't
+    // intersect, so Factory opts out cleanly here.
+    if (run && !isFactoryFacility(facility)) {
+      applyEnemyRuntimeStats(run, { team: effectiveTeam }, diff);
+    }
+
     const team = {};
     // Parallel array: simulated natures per slot so the Palace rule can look
     // up the active opponent's nature by slot index at combat time.
@@ -6456,15 +6802,11 @@
       sprite: trainer.sprite,
       // `difficulty` is read by explore.js:531 as the enemy's HP MULTIPLIER
       // (`hpMultiplier = areas[currentArea].difficulty`). The player's own
-      // hpMultiplier is 4 for trainer areas (teams.js:514). Anything above
-      // ~5-6 tilts fights heavily toward the NPC tank.
-      //   • Tier 1 : 4  (parity with player — round 1 feels fair)
-      //   • Tier 2 : 6
-      //   • Tier 3 : 8
-      //   • Tier 4 : 10
-      //   • Tier 5 : 12 (endgame, 3× player HP pool)
-      // Post-Gold rematches add via the multiplier field separately.
-      difficulty: (trainer.tier ? trainer.tier * 2 + 2 : 4),
+      // hpMultiplier is 4 for trainer areas (teams.js:514). Uses the unified
+      // diff.hpMult: tier*2+2 base curve (4/6/8/10/12) + 2 per post-Gold
+      // rematch level — so mult 2 = +2 HP pool, mult 3 = +4, etc. Makes the
+      // multiplier actually bite in combat instead of being purely cosmetic.
+      difficulty: diff.hpMult || (trainer.tier ? trainer.tier * 2 + 2 : 4),
       trainer: true,
       type: "vs",
       level: 100,
@@ -6625,20 +6967,21 @@
       const brainTeam = bossInfo.kind === "silver"
         ? facility.brain.teamSilver
         : facility.brain.teamGold;
+      const brainDiff = computeRunDifficulty(nextRound, facility);
       trainer = {
         name: window.gameLang === "fr" ? facility.brain.nameFr : facility.brain.nameEn,
         sprite: facility.brain.sprite,
         team: brainTeam
           ? brainTeam.map((id) => ({
               id,
-              moves: pickMovesetFor(id),
+              moves: pickMovesetFor(id, brainDiff),
               nature: simulateNatureFor(id),
             }))
           : [1, 2, 3].map(() => {
               const id = pickFromPool(5);
-              return { id, moves: pickMovesetFor(id), nature: simulateNatureFor(id) };
+              return { id, moves: pickMovesetFor(id, brainDiff), nature: simulateNatureFor(id) };
             }),
-        tier: 3,
+        tier: brainDiff.tier,
         multiplier: bossInfo.multiplier,
         bossKind: bossInfo.kind,
         isBoss: true,
@@ -6841,6 +7184,10 @@
     // activeRun, otherwise the stash references disappear.
     const fac = FACILITIES.find((f) => f.id === run.facilityId);
     if (isFactoryFacility(fac)) cleanupFactoryRun(run);
+    // Defensive enemy-state restore. exitCombat hook normally does this,
+    // but if the defeat path ever fires without going through exitCombat
+    // (or if the hook short-circuited) we still want pkmn[] clean.
+    try { restoreEnemyRuntimeStats(run); } catch (e) { /* ignore */ }
     if (isPyramidFacility(fac)) {
       try { setPyramidModalSizing(false); } catch (e) { /* ignore */ }
     }
@@ -6901,6 +7248,17 @@
         saved &&
         (saved.currentArea === RUN_AREA_ID ||
           saved.lastAreaJoined === RUN_AREA_ID);
+      // Restore enemy runtime stat overrides BEFORE the vanilla exitCombat
+      // runs — so any post-combat state reads (achievements, dex updates,
+      // player-team inspection) sees the untouched pkmn[id] state again.
+      // Factory has its own cleanup path; applyEnemyRuntimeStats is strictly
+      // non-Factory.
+      if (wasFrontierRun) {
+        const _run = saved && saved.frontierExt && saved.frontierExt.activeRun;
+        if (_run) {
+          try { restoreEnemyRuntimeStats(_run); } catch (e) { /* ignore */ }
+        }
+      }
       const res = orig.apply(this, arguments);
       if (wasFrontierRun && typeof updateFrontier === "function") {
         try {
@@ -7285,7 +7643,17 @@
     silverRoundFor,
     goldRoundFor,
     postGoldEveryFor,
+    nextGoalRoundFor,
     battlesPerRound,
+    // Unified difficulty spec — inspect for a given round in DevTools:
+    // __frontierExt.computeRunDifficulty(15, __frontierExt.FACILITIES[0])
+    tierForRound,
+    computeRunDifficulty,
+    applyEnemyRuntimeStats,
+    restoreEnemyRuntimeStats,
+    pickMovesetFor,
+    simulateNatureFor,
+    FACILITIES,
     // Pool debug
     getPool,
     getPoolForFacility,
