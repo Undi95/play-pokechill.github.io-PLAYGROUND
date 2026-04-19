@@ -416,12 +416,12 @@
          + (b.satk || 0) + (b.sdef || 0) + (b.spe || 0);
   }
 
-  // Cached per-tier pool. NOT frozen — the cache can be rebuilt via
-  // __frontierExt.resetPoolCache() if the pkmn dict changes at runtime or
-  // if the game data finishes loading after our first query.
-  const _poolCache = {};
+  // No caching — the pkmn dictionary is iterated on every call because (a)
+  // its contents can be mutated at runtime by the game (caught flags,
+  // tagObtainedIn re-assignment on load, etc.) and (b) it's a ~600-entry
+  // pass that takes well under 1 ms. Avoids entire classes of stale-cache
+  // bugs in exchange for negligible cost.
   function getPool(tier) {
-    if (_poolCache[tier]) return _poolCache[tier];
     if (typeof pkmn === "undefined") return ["tauros"];
     const cfg = TIER_BST[tier] || TIER_BST[1];
     const ids = [];
@@ -431,17 +431,27 @@
       const total = bstTotal(p);
       if (total < cfg.min || total > cfg.max) continue;
       if (!cfg.unobtainable && p.tagObtainedIn === "unobtainable") continue;
-      // Skip form variants we don't want to pick randomly (megas, gmax that
-      // require specific items)
+      // Skip form variants that require a specific item to exist
       if (/Mega|Gmax|Primal/.test(id)) continue;
       ids.push(id);
     }
-    _poolCache[tier] = ids.length ? ids : ["tauros"];
-    return _poolCache[tier];
+    return ids.length ? ids : ["tauros"];
   }
 
-  function resetPoolCache() {
-    for (const k of Object.keys(_poolCache)) delete _poolCache[k];
+  // Kept for back-compat with the debug API — now a no-op since there's no
+  // pool cache. Callers that invalidate bracket state should use
+  // resetActiveRun() below instead.
+  function resetPoolCache() {}
+
+  // Debug helper: wipe the active run (including the cached bracket
+  // trainers) so the next click re-generates everything from scratch with
+  // the current code. Useful after fixing a trainer-gen bug while a run
+  // was mid-flight.
+  function resetActiveRun() {
+    if (typeof saved === "object" && saved && saved.frontierExt) {
+      saved.frontierExt.activeRun = null;
+    }
+    if (typeof updateFrontier === "function") updateFrontier();
   }
 
   function pickFromPool(tier) {
@@ -1892,6 +1902,7 @@
     // Pool debug
     getPool,
     resetPoolCache,
+    resetActiveRun,
     bstTotal,
     TIER_BST,
     // quick helper to reset all runs/symbols for testing
