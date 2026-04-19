@@ -833,7 +833,7 @@
     if (typeof saved === "object" && saved && saved.frontierExt) {
       saved.frontierExt.activeRun = null;
     }
-    if (typeof updateFrontier === "function") updateFrontier();
+    refreshActiveFrontierView();
   }
 
   function pickFromPool(tier) {
@@ -3899,7 +3899,7 @@
       saved.frontierExt.activeRun = null;
       // Team stays unlocked now that the challenge is over.
       try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
-      if (typeof updateFrontier === "function") updateFrontier();
+      refreshActiveFrontierView();
       if (typeof closeTooltip === "function") closeTooltip();
       return;
     }
@@ -3917,7 +3917,7 @@
       if (typeof closeTooltip === "function") closeTooltip();
       // Refresh the frontier listing so the tile re-renders with the
       // in-progress badge + heat sticker if applicable.
-      if (typeof updateFrontier === "function") updateFrontier();
+      refreshActiveFrontierView();
       return;
     }
     if (action === "launch") {
@@ -6495,7 +6495,7 @@
       }
       if (run.round === silverRoundFor(facility)) saved.frontierExt.symbols[run.facilityId].silver = true;
       else if (run.round === goldRoundFor(facility)) saved.frontierExt.symbols[run.facilityId].gold = true;
-      if (typeof updateFrontier === "function") updateFrontier();
+      refreshActiveFrontierView();
       if (typeof closeTooltip === "function") closeTooltip();
       return;
     }
@@ -7464,7 +7464,7 @@
         try { showTiedTeamLostModal(facility); } catch (e) { /* ignore */ }
         saved.frontierExt.activeRun = null;
         try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
-        if (typeof updateFrontier === "function") updateFrontier();
+        refreshActiveFrontierView();
         return;
       }
     }
@@ -7683,11 +7683,10 @@
       const res = orig.apply(this, arguments);
       if (wasFrontierRun && typeof updateFrontier === "function") {
         try {
-          updateFrontier();
-          // Also flip the vs-selector highlight to show Frontier is active
-          // (vanilla code does this via onclick — we replay the effect).
-          const selBtn = document.querySelector('#vs-selector div[onclick*="updateFrontier"]');
-          if (selBtn) selBtn.click();
+          // Route the post-combat view back to whichever sub-tab holds
+          // the facility the run belongs to. Hoenn BF sub-tab for our 7
+          // facilities, vanilla Battle Frontier tab for everything else.
+          refreshActiveFrontierView();
           // Post-combat auto-reopen. The ZdC flow should always land on a
           // clear "next step" modal — never dump the player on the
           // Frontier tab with no guidance. Branches, in priority order:
@@ -7861,40 +7860,191 @@
   }
 
   // ─── 7. INJECTION HOOK ────────────────────────────────────────────────────
-  // Patch updateFrontier() so our tiles get appended every time the Frontier
-  // menu re-renders. Uses the same funcsToHook pattern as the i18n engine.
+  // Patch updateVS() / updateFrontier() so the "ZdC d'Hoenn" sub-tab button
+  // gets re-appended to the vanilla #vs-selector every time they re-render
+  // it (the vanilla rebuild wipes it otherwise), and clears our own listing
+  // when the player switches to a different tab. Adds a global
+  // `window.updateHoennBF` that does the mirror-image: hides the other
+  // listings, highlights the Hoenn tab, renders the 7 secret facilities
+  // into `#frontier-hoenn-listing`.
+  const HOENN_TAB_ID = "frontier-hoenn-tab";
+  const HOENN_LISTING_ID = "frontier-hoenn-listing";
+
+  // DOM guard: creates the Hoenn listing div next to the vanilla ones
+  // (siblings inside #vs-menu). Returns the element, or null if the
+  // frontier-listing host isn't in the DOM yet (game still booting).
+  function ensureHoennListing() {
+    let el = document.getElementById(HOENN_LISTING_ID);
+    if (el) return el;
+    const frontierListing = document.getElementById("frontier-listing");
+    if (!frontierListing || !frontierListing.parentNode) return null;
+    el = document.createElement("div");
+    el.id = HOENN_LISTING_ID;
+    el.style.display = "none";
+    frontierListing.parentNode.insertBefore(el, frontierListing.nextSibling);
+    return el;
+  }
+
+  // Build the tab button node. Active = purple pill; inactive = neutral.
+  // The SVG is a spiky tower icon distinct from the vanilla "Trainers"
+  // circle and "Battle Frontier" flag so the three tabs read at a glance.
+  function buildHoennTabButton(lang, active) {
+    const btn = document.createElement("div");
+    btn.id = HOENN_TAB_ID;
+    btn.onclick = () => { if (typeof window.updateHoennBF === "function") window.updateHoennBF(); };
+    if (active) {
+      btn.style.cssText = "background:#6b4694; outline:solid 1px #a14dff; color:white; z-index:2;";
+    }
+    const label = lang === "fr" ? "ZdC d'Hoenn" : "Hoenn BF";
+    btn.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 32 32"><path fill="currentColor" d="M14 2h4v2h-4zm-1 3h6v3h-6zm-2 4h10v2h-10zm1 3h8v4h-8zm-1 5h10v3h-10zm-1 4h12v3h-12zm-1 4h14v3h-14zm-1 4h16v4h-16z"/></svg>
+      ${label}`;
+    return btn;
+  }
+
+  // Inject / re-inject the Hoenn tab button into #vs-selector. Vanilla
+  // updateVS / updateFrontier overwrite the selector's innerHTML on every
+  // call, so this has to be called AFTER the vanilla rebuild — otherwise
+  // the button disappears the moment the player clicks another tab.
+  function ensureHoennTabButton() {
+    const sel = document.getElementById("vs-selector");
+    if (!sel) return;
+    if (sel.querySelector(`#${HOENN_TAB_ID}`)) return;
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    sel.appendChild(buildHoennTabButton(lang, false));
+  }
+
+  // Single "refresh the current listing" helper. Used by internal code
+  // paths that need to re-render after a state change (abandon, victory,
+  // rest, etc.) — routes to the Hoenn tab if the active run is in one
+  // of our facilities, otherwise falls back to the vanilla frontier tab.
+  function refreshActiveFrontierView() {
+    const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
+    const isHoennRun = run && FACILITIES.some((f) => f.id === run.facilityId);
+    if (isHoennRun && typeof window.updateHoennBF === "function") {
+      window.updateHoennBF();
+    } else if (typeof updateFrontier === "function") {
+      updateFrontier();
+    }
+  }
+
   function installInjection() {
-    if (typeof window.updateFrontier !== "function") {
+    if (typeof window.updateFrontier !== "function" || typeof window.updateVS !== "function") {
       setTimeout(installInjection, 100);
       return;
     }
+
+    // Make sure the Hoenn listing div exists in the DOM even before the
+    // player clicks anything.
+    ensureHoennListing();
+
+    // Wrap vanilla updateFrontier: after it finishes, re-add the Hoenn
+    // tab button + hide our listing (so BF and Hoenn listings don't show
+    // simultaneously).
     const origUpdateFrontier = window.updateFrontier;
     window.updateFrontier = function () {
       const res = origUpdateFrontier.apply(this, arguments);
       try {
-        ensureSaveSlot();
-        sanitizeNullSlots();
-        recoverCorruptedDomeTeam();
         injectStyles();
-        const listing = document.getElementById("frontier-listing");
-        if (!listing) return res;
-        // Section header separating the vanilla facilities (division-locked,
-        // shown in the league banner at the top) from our secret section
-        // (Open Level, no division rules, Gen 3 canonical rulesets).
-        listing.appendChild(buildDivider());
-        // Append our tiles after whatever the original rendered.
-        for (const facility of FACILITIES) {
-          listing.appendChild(buildTile(facility));
+        ensureHoennTabButton();
+        const hoennListing = document.getElementById(HOENN_LISTING_ID);
+        if (hoennListing) {
+          hoennListing.innerHTML = "";
+          hoennListing.style.display = "none";
         }
-        // Let i18n translate any EN strings we didn't hardcode.
         if (typeof translateDOM === "function" && window.gameLang === "fr") {
           requestAnimationFrame(translateDOM);
         }
       } catch (e) {
-        console.error("[frontier-ext] injection failed:", e);
+        console.error("[frontier-ext] updateFrontier hook failed:", e);
       }
       return res;
     };
+
+    // Same for updateVS (Trainers tab).
+    const origUpdateVS = window.updateVS;
+    window.updateVS = function () {
+      const res = origUpdateVS.apply(this, arguments);
+      try {
+        injectStyles();
+        ensureHoennTabButton();
+        const hoennListing = document.getElementById(HOENN_LISTING_ID);
+        if (hoennListing) {
+          hoennListing.innerHTML = "";
+          hoennListing.style.display = "none";
+        }
+      } catch (e) {
+        console.error("[frontier-ext] updateVS hook failed:", e);
+      }
+      return res;
+    };
+
+    // Expose the Hoenn BF tab as a global so the vanilla selector buttons
+    // can use it via onclick attributes and other hooks can route here.
+    window.updateHoennBF = function () {
+      try {
+        const lang = window.gameLang === "fr" ? "fr" : "en";
+        ensureSaveSlot();
+        sanitizeNullSlots();
+        recoverCorruptedDomeTeam();
+        injectStyles();
+
+        const sel = document.getElementById("vs-selector");
+        const vsListing = document.getElementById("vs-listing");
+        const frontierListing = document.getElementById("frontier-listing");
+        const hoennListing = ensureHoennListing();
+        if (!sel || !hoennListing) return;
+
+        // Rebuild the selector with three tabs — Hoenn highlighted.
+        sel.innerHTML = "";
+        const trainersBtn = document.createElement("div");
+        trainersBtn.onclick = () => window.updateVS && window.updateVS();
+        trainersBtn.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="m10.618 15.27l.817.788q.242.242.565.242t.566-.242l.816-.789h1.08q.343 0 .575-.232t.232-.575v-1.08l.789-.816q.242-.243.242-.566t-.242-.565l-.789-.817v-1.08q0-.343-.232-.575t-.575-.232h-1.083l-.95-.945q-.183-.186-.427-.186t-.43.186l-.95.945H9.538q-.344 0-.576.232t-.232.576v1.08l-.789.816Q7.7 11.677 7.7 12t.242.566l.789.816v1.08q0 .343.232.575t.576.232zM9.066 19h-2.45q-.667 0-1.141-.475T5 17.386v-2.451l-1.79-1.803q-.237-.243-.349-.534t-.111-.594q0-.301.112-.596t.347-.538L5 9.066v-2.45q0-.667.475-1.141T6.615 5h2.451l1.803-1.79q.243-.237.534-.349t.594-.111q.301 0 .596.112t.538.347L14.934 5h2.45q.667 0 1.142.475T19 6.615v2.451l1.79 1.803q.237.243.349.534t.111.594q0 .301-.111.596t-.348.538L19 14.934v2.45q0 .667-.475 1.142t-1.14.474h-2.451l-1.803 1.79q-.243.237-.534.349t-.594.111q-.301 0-.596-.111t-.538-.348zm.433-1l2.059 2.058q.173.173.442.173t.442-.173L14.502 18h2.882q.27 0 .443-.173t.173-.442V14.5l2.058-2.059q.173-.173.173-.442t-.173-.442L18 9.498V6.617q0-.27-.173-.443T17.385 6H14.5l-2.059-2.058Q12.27 3.77 12 3.77t-.442.173L9.498 6H6.617q-.27 0-.443.173T6 6.616v2.883l-2.058 2.059q-.173.173-.173.442t.173.442L6 14.502v2.882q0 .27.173.443t.443.173zM12 12"/></svg>
+          ${lang === "fr" ? "Dresseurs" : "Trainers"}`;
+        sel.appendChild(trainersBtn);
+        const bfBtn = document.createElement("div");
+        bfBtn.onclick = () => window.updateFrontier && window.updateFrontier();
+        bfBtn.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M17 22H7a2 2 0 0 1-2-2v-8.818a.6.6 0 0 0-.1-.333L3.1 8.15a.6.6 0 0 1-.1-.333V2.6a.6.6 0 0 1 .6-.6h1.8a.6.6 0 0 1 .6.6v1.8a.6.6 0 0 0 .6.6h2.8a.6.6 0 0 0 .6-.6V2.6a.6.6 0 0 1 .6-.6h2.8a.6.6 0 0 1 .6.6v1.8a.6.6 0 0 0 .6.6h2.8a.6.6 0 0 0 .6-.6V2.6a.6.6 0 0 1 .6-.6h1.8a.6.6 0 0 1 .6.6v5.218a.6.6 0 0 1-.1.333l-1.8 2.698a.6.6 0 0 0-.1.333V20a2 2 0 0 1-2 2Z"/></svg>
+          ${lang === "fr" ? "VS Zone de Combat" : "Battle Frontier"}`;
+        sel.appendChild(bfBtn);
+        sel.appendChild(buildHoennTabButton(lang, true));
+
+        // Hide the other listings.
+        if (vsListing)       { vsListing.innerHTML = "";       vsListing.style.display = "none"; }
+        if (frontierListing) { frontierListing.innerHTML = ""; frontierListing.style.display = "none"; }
+        hoennListing.style.display = "";
+
+        // Header — match the existing VS Frontier header shape (text only
+        // is fine; vanilla updateFrontier uses a much bigger header with
+        // a rotation timer, but our section has no rotations).
+        const header = document.getElementById("vs-menu-header");
+        if (header) {
+          const helpLabel = lang === "fr" ? "ZdC d'Hoenn" : "Hoenn BF";
+          header.innerHTML = `
+            <span data-help="Frontier">⚔️ ${helpLabel}
+              <svg style="opacity:0.8; pointer-events:none" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><g fill="currentColor"><path d="M11 16.25a1.25 1.25 0 1 1-2.5 0a1.25 1.25 0 0 1 2.5 0"/><path fill-rule="evenodd" d="M9.71 4.065c-.807 0-1.524.24-2.053.614c-.51.36-.825.826-.922 1.308a.75.75 0 1 1-1.47-.297c.186-.922.762-1.696 1.526-2.236c.796-.562 1.82-.89 2.919-.89c2.325 0 4.508 1.535 4.508 3.757c0 1.292-.768 2.376-1.834 3.029a.75.75 0 0 1-.784-1.28c.729-.446 1.118-1.093 1.118-1.749c0-1.099-1.182-2.256-3.008-2.256m0 5.265a.75.75 0 0 1 .75.75v1.502a.75.75 0 1 1-1.5 0V10.08a.75.75 0 0 1 .75-.75" clip-rule="evenodd"/></g></svg>
+            </span>`;
+        }
+
+        // Fill our listing: divider + 7 tiles.
+        hoennListing.innerHTML = "";
+        hoennListing.appendChild(buildDivider());
+        for (const facility of FACILITIES) {
+          hoennListing.appendChild(buildTile(facility));
+        }
+        if (typeof translateDOM === "function" && window.gameLang === "fr") {
+          requestAnimationFrame(translateDOM);
+        }
+      } catch (e) {
+        console.error("[frontier-ext] updateHoennBF failed:", e);
+      }
+    };
+
+    // Prime the Hoenn tab button immediately so it's visible on first load
+    // even before the player clicks any VS sub-tab.
+    ensureHoennTabButton();
   }
 
   // ─── 8. BOOTSTRAP ─────────────────────────────────────────────────────────
@@ -8089,7 +8239,7 @@
     resetAll: () => {
       if (typeof saved === "object" && saved) saved.frontierExt = null;
       ensureSaveSlot();
-      if (typeof updateFrontier === "function") updateFrontier();
+      refreshActiveFrontierView();
     },
   };
 })();
