@@ -2608,7 +2608,7 @@
           opponentTeam: "Équipe adverse",
           need2: "Sélectionne exactement 2 Pokémon.",
           confirm: "⚔️ Confirmer et combattre",
-          back: "Retour",
+          abandon: "Abandonner",
         }
       : {
           title: "Pick 2 Pokémon",
@@ -2617,7 +2617,7 @@
           opponentTeam: "Opponent",
           need2: "Select exactly 2 Pokémon.",
           confirm: "⚔️ Confirm & fight",
-          back: "Back",
+          abandon: "Abandon",
         };
 
     const top = document.getElementById("tooltipTop");
@@ -2666,7 +2666,7 @@
         </div>
         <div class="frontier-ext-run-actions">
           <button class="frontier-ext-action-btn primary" data-action="confirm-dome" ${canConfirm ? "" : "disabled style=\"opacity:0.4;cursor:not-allowed;\""}>${t.confirm}</button>
-          <button class="frontier-ext-action-btn" data-action="back">${t.back}</button>
+          <button class="frontier-ext-action-btn danger" data-action="abandon">${t.abandon}</button>
         </div>
       `;
       bottom.querySelectorAll("[data-action]").forEach((btn) => {
@@ -2893,7 +2893,7 @@
           remainingInBracket: "Adversaires à venir dans ce bracket",
           warn: "⚠️ Tous tes Pokémon doivent être niveau 100.",
           launch: "⚔️ Lancer le combat",
-          cancel: "Annuler",
+          abandon: "Abandonner",
           qf: "Quart",
           sf: "Demi",
           final: "Finale",
@@ -2907,7 +2907,7 @@
           remainingInBracket: "Upcoming opponents in this bracket",
           warn: "⚠️ All your Pokémon must be level 100.",
           launch: "⚔️ Launch battle",
-          cancel: "Cancel",
+          abandon: "Abandon",
           qf: "QF",
           sf: "SF",
           final: "Final",
@@ -2967,7 +2967,7 @@
         <div style="padding:0.4rem 0.8rem;color:#7a2e1a;font-size:0.85rem;text-align:center;">${t.warn}</div>
         <div class="frontier-ext-run-actions">
           <button class="frontier-ext-action-btn primary" data-action="launch">${t.launch}</button>
-          <button class="frontier-ext-action-btn" data-action="back">${t.cancel}</button>
+          <button class="frontier-ext-action-btn danger" data-action="abandon">${t.abandon}</button>
         </div>
       `;
       bottom.querySelectorAll("[data-action]").forEach((btn) => {
@@ -3003,7 +3003,7 @@
           vs: "vs",
           warn: "⚠️ Tous tes Pokémon doivent être niveau 100. Sinon le combat sera très dur !",
           launch: "⚔️ Lancer le combat",
-          cancel: "Annuler",
+          abandon: "Abandonner",
         }
       : {
           round: "Round",
@@ -3011,26 +3011,41 @@
           vs: "vs",
           warn: "⚠️ All your Pokémon must be level 100. The battle will be very hard otherwise!",
           launch: "⚔️ Launch battle",
-          cancel: "Cancel",
+          abandon: "Abandon",
         };
 
-    // Generate or reuse the upcoming trainer
-    let trainer;
-    if (isSilverBoss || isGoldBoss) {
-      const brainTeam = isSilverBoss ? facility.brain.teamSilver : facility.brain.teamGold;
-      trainer = {
-        name: lang === "fr" ? facility.brain.nameFr : facility.brain.nameEn,
-        sprite: facility.brain.sprite,
-        team: brainTeam
-          ? brainTeam.map((id) => ({ id, moves: pickMovesetFor(id) }))
-          : [1, 2, 3].map(() => {
-              const id = pickFromPool(3);
-              return { id, moves: pickMovesetFor(id) };
-            }),
-        isBoss: true,
-      };
-    } else {
-      trainer = generateTrainer(nextRound, facility);
+    // Generate or REUSE the upcoming trainer. Persistence matters: if
+    // we re-rolled on every modal open, the player could close the
+    // tooltip and re-click the facility tile until they liked the
+    // matchup. Cache on `run.upcomingTrainer` — gets cleared in
+    // onRunVictory/onRunDefeat so the next battle always rolls fresh.
+    // Boss trainers are deterministic (fixed teams per brain), so the
+    // "cache" is really only load-protection for them.
+    let trainer = run.upcomingTrainer;
+    const trainerStale = !trainer
+      || trainer.facilityId !== facility.id
+      || trainer.round !== nextRound
+      || (!!trainer.isBoss) !== (isSilverBoss || isGoldBoss);
+    if (trainerStale) {
+      if (isSilverBoss || isGoldBoss) {
+        const brainTeam = isSilverBoss ? facility.brain.teamSilver : facility.brain.teamGold;
+        trainer = {
+          name: lang === "fr" ? facility.brain.nameFr : facility.brain.nameEn,
+          sprite: facility.brain.sprite,
+          team: brainTeam
+            ? brainTeam.map((id) => ({ id, moves: pickMovesetFor(id) }))
+            : [1, 2, 3].map(() => {
+                const id = pickFromPool(3);
+                return { id, moves: pickMovesetFor(id) };
+              }),
+          isBoss: true,
+          facilityId: facility.id,
+          round: nextRound,
+        };
+      } else {
+        trainer = generateTrainer(nextRound, facility);
+        // generateTrainer already sets facilityId + round; nothing extra.
+      }
     }
 
     // Factory species-overlap dedupe: if the opponent happens to roll a
@@ -3039,8 +3054,11 @@
     // rental spec (applyFactoryMoves). Net effect: the opponent fights
     // with your own stats, and post-battle swap becomes a no-op. Re-roll
     // any overlap from the same tier pool so every opponent mon is
-    // distinct from your rentals.
-    if (isFactoryFacility(facility) && run.factoryTeam && Array.isArray(trainer.team)) {
+    // distinct from your rentals. Run ONLY on a fresh trainer roll, never
+    // on a cached one — otherwise reopening the modal would re-roll
+    // overlapping slots and give the player another trainer-variation
+    // cheese.
+    if (trainerStale && isFactoryFacility(facility) && run.factoryTeam && Array.isArray(trainer.team)) {
       const rentalIds = new Set(run.factoryTeam.map((r) => r.id));
       const tierForPool = trainer.tier || 1;
       const poolForReroll = getPoolForFacility(facility, tierForPool, nextRound);
@@ -3096,7 +3114,7 @@
         <div style="padding:0.4rem 0.8rem;color:#7a2e1a;font-size:0.85rem;text-align:center;">${t.warn}</div>
         <div class="frontier-ext-run-actions">
           <button class="frontier-ext-action-btn primary" data-action="launch">${t.launch}</button>
-          <button class="frontier-ext-action-btn" data-action="back">${t.cancel}</button>
+          <button class="frontier-ext-action-btn danger" data-action="abandon">${t.abandon}</button>
         </div>
       `;
       bottom.querySelectorAll("[data-action]").forEach((btn) => {
@@ -5455,7 +5473,6 @@
       bottom.innerHTML = `
         <div class="frontier-ext-pike-doors">${doors}</div>
         <div class="frontier-ext-run-actions">
-          <button class="frontier-ext-action-btn" data-action="back">${l.back}</button>
           <button class="frontier-ext-action-btn danger" data-action="abandon">${l.abandon}</button>
         </div>
       `;
