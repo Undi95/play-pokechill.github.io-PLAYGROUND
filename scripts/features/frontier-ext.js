@@ -1433,7 +1433,38 @@
         font-size: 0.7rem;
         opacity: 0.75;
         font-style: italic;
+        margin-bottom: 0.15rem;
+      }
+      .frontier-ext-factory-card .ability {
+        font-size: 0.72rem;
+        color: #ffd17a;
+        font-weight: bold;
+        text-align: center;
         margin-bottom: 0.2rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .frontier-ext-factory-card .ivs {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.08rem 0.2rem;
+        margin-bottom: 0.25rem;
+        font-size: 0.62rem;
+      }
+      .frontier-ext-factory-card .ivs .iv-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.2rem;
+      }
+      .frontier-ext-factory-card .ivs .iv-row .k {
+        opacity: 0.65;
+      }
+      .frontier-ext-factory-card .ivs .iv-row .v {
+        color: #ffd700;
+        letter-spacing: -0.08em;
+        font-size: 0.58rem;
       }
       .frontier-ext-factory-card .moves {
         display: flex;
@@ -3741,10 +3772,50 @@
     return !!(facility && facility.rules && facility.rules.rentalPool);
   }
 
+  // The 7 natures Pokechill exposes (matching natureDictionary). "" is
+  // the neutral slot — no stat change.
+  const FACTORY_RENTAL_NATURES = ["adamant", "modest", "jolly", "relaxed", "quiet", "bold", ""];
+
+  // Random 0-6 IV. Pokechill's IV scale is 0 to 6 (see teams.js:521+ and
+  // the game's pkmn init at pkmnDictionary.js:20195).
+  function rollFactoryIv() { return Math.floor(Math.random() * 7); }
+
+  function rollFactoryIvs() {
+    return {
+      hp: rollFactoryIv(),
+      atk: rollFactoryIv(),
+      def: rollFactoryIv(),
+      satk: rollFactoryIv(),
+      sdef: rollFactoryIv(),
+      spe: rollFactoryIv(),
+    };
+  }
+
+  // Pick a random ability for this species from the game's global
+  // ability dict. Uses `learnPkmnAbility(id)` when available (canonical
+  // type-weighted picker), else falls back to a random key.
+  function rollFactoryAbility(id) {
+    if (typeof pkmn === "undefined" || !pkmn[id]) return null;
+    if (typeof learnPkmnAbility === "function") {
+      try {
+        const picked = learnPkmnAbility(id);
+        if (picked) return picked;
+      } catch (e) { /* fall through */ }
+    }
+    // Fallback: pick the hidden ability id if defined, else null.
+    const h = pkmn[id].hiddenAbility;
+    return h ? (h.id || null) : null;
+  }
+
   // Tier-scaled pool of FACTORY_POOL_SIZE unique rentals. Uses the same
   // tier-by-round curve as generateTrainer AND the same
   // getPoolForFacility narrowing — so player and enemy start from a
   // balanced weak pool in rounds 1-3, then the whole tier opens up.
+  //
+  // CRITICAL: each rental gets its own randomised nature / IVs / ability
+  // — completely independent of the user's own pkmn[id] state. This
+  // means the user can never "get lucky" on a species they've trained
+  // to S-tier IVs; rentals are always freshly rolled stat blocks.
   function generateFactoryRentalPool(facility, round) {
     const mult = difficultyMultiplier(round, facility);
     const gold = goldRoundFor(facility);
@@ -3767,25 +3838,34 @@
       rentals.push({
         id,
         moves: pickMovesetFor(id),
-        nature: simulateNatureFor(id),
+        nature: FACTORY_RENTAL_NATURES[Math.floor(Math.random() * FACTORY_RENTAL_NATURES.length)],
+        ivs: rollFactoryIvs(),
+        ability: rollFactoryAbility(id),
       });
     }
     return rentals;
   }
 
-  // Temporarily override `pkmn[id].moves` with the rental's chosen
-  // moveset so the combat engine fires the right moves. Originals are
-  // stashed on `run.factoryOriginalMoves` for restore when the round
-  // ends / run ends. Shared pkmn dict entries are shallow-cloned so we
-  // don't corrupt user data.
+  // Temporarily override a rental's full stat block on the shared
+  // `pkmn[id]` entry — moves, nature, IVs, ability — so the combat
+  // engine reads the RENTAL's randomised spec and never the user's own
+  // trained Pokémon of the same species. Originals are stashed on
+  // run.factoryOriginalState so we can fully restore at round-end /
+  // run-end (even if the user never caught that species originally, we
+  // record `undefined` and restore back to `undefined`).
   function applyFactoryMoves(run) {
     if (!run || !run.factoryTeam || typeof pkmn === "undefined") return;
-    if (!run.factoryOriginalMoves) run.factoryOriginalMoves = {};
+    if (!run.factoryOriginalState) run.factoryOriginalState = {};
     for (const rental of run.factoryTeam) {
       const p = pkmn[rental.id];
       if (!p) continue;
-      if (!run.factoryOriginalMoves[rental.id] && p.moves) {
-        run.factoryOriginalMoves[rental.id] = { ...p.moves };
+      if (!run.factoryOriginalState[rental.id]) {
+        run.factoryOriginalState[rental.id] = {
+          moves: p.moves ? { ...p.moves } : undefined,
+          nature: p.nature,
+          ivs: p.ivs ? { ...p.ivs } : undefined,
+          ability: p.ability,
+        };
       }
       p.moves = {
         slot1: rental.moves[0],
@@ -3793,14 +3873,21 @@
         slot3: rental.moves[2],
         slot4: rental.moves[3],
       };
+      p.nature = rental.nature || "";
+      p.ivs = { ...rental.ivs };
+      p.ability = rental.ability || undefined;
     }
   }
   function restoreFactoryMoves(run) {
-    if (!run || !run.factoryOriginalMoves || typeof pkmn === "undefined") return;
-    for (const [id, orig] of Object.entries(run.factoryOriginalMoves)) {
-      if (pkmn[id]) pkmn[id].moves = orig;
+    if (!run || !run.factoryOriginalState || typeof pkmn === "undefined") return;
+    for (const [id, orig] of Object.entries(run.factoryOriginalState)) {
+      if (!pkmn[id]) continue;
+      pkmn[id].moves = orig.moves;
+      pkmn[id].nature = orig.nature;
+      pkmn[id].ivs = orig.ivs;
+      pkmn[id].ability = orig.ability;
     }
-    run.factoryOriginalMoves = {};
+    run.factoryOriginalState = {};
   }
 
   // Switch the active previewTeam slot to the private Factory slot so
@@ -3915,6 +4002,14 @@
     }
 
     const renderCards = () => {
+      const ivLabels = lang === "fr"
+        ? { hp: "PV", atk: "Atk", def: "Déf", satk: "AtS", sdef: "DéS", spe: "Vit" }
+        : { hp: "HP", atk: "Atk", def: "Def", satk: "SAtk", sdef: "SDef", spe: "Spe" };
+      const ivStar = (n) => {
+        const v = Math.max(0, Math.min(6, n | 0));
+        return "★".repeat(v) + "☆".repeat(6 - v);
+      };
+      const neutralLabel = lang === "fr" ? "Neutre" : "Neutral";
       const cards = run.factoryPool.map((rental, idx) => {
         const selected = run.factorySelection.indexOf(idx) !== -1;
         const monName = typeof format === "function" ? format(rental.id) : rental.id;
@@ -3924,12 +4019,25 @@
         }).join("");
         const natureLabel = rental.nature
           ? (typeof format === "function" ? format(rental.nature) : rental.nature)
+          : neutralLabel;
+        const abilityLabel = rental.ability
+          ? (typeof format === "function" ? format(rental.ability) : rental.ability)
           : "—";
+        const iv = rental.ivs || {};
+        const ivRow = (k) =>
+          `<div class="iv-row"><span class="k">${ivLabels[k]}</span><span class="v">${ivStar(iv[k])}</span></div>`;
+        const ivsBlock = `
+          <div class="ivs">
+            ${ivRow("hp")}${ivRow("atk")}${ivRow("def")}
+            ${ivRow("satk")}${ivRow("sdef")}${ivRow("spe")}
+          </div>`;
         return `
           <div class="frontier-ext-factory-card ${selected ? "selected" : ""}" data-idx="${idx}">
             <img src="img/pkmn/sprite/${rental.id}.png" alt="${monName}" class="sprite">
             <div class="name">${monName}</div>
             <div class="nature">${natureLabel}</div>
+            <div class="ability">${abilityLabel}</div>
+            ${ivsBlock}
             <div class="moves">${movesList}</div>
             ${selected ? `<div class="pick-badge">${run.factorySelection.indexOf(idx) + 1}</div>` : ""}
           </div>
@@ -5590,13 +5698,37 @@
     };
   }
 
-  // Capture-phase right-click / long-press blocker that stops the
-  // game's tooltip.js contextmenu handler from opening the Pokémon
-  // editor on any team sprite during an active frontier run. Without
-  // this, players can right-click a team member mid-combat, edit moves
-  // on their own Pokémon, and walk back into the fight with the new
-  // moveset. Scoped to #explore-team (combat sidebar) + #team-preview
-  // (team menu) so Pokédex / storage / other contexts stay usable.
+  // True if the given Pokémon species ID is currently part of the tied
+  // preview team of an active frontier run. Used by the right-click
+  // blocker to forbid editing the run's Pokémon even when the player
+  // browses to them from ANY screen (dex, storage, genetics, etc.).
+  function isPkmnInActiveRunTeam(pkmnId) {
+    if (!pkmnId) return false;
+    if (typeof saved !== "object" || !saved) return false;
+    const run = saved.frontierExt && saved.frontierExt.activeRun;
+    if (!run) return false;
+    const tiedSlot = run.tiedPreviewSlot || run.pikeTeamSource;
+    if (!tiedSlot) return false;
+    const pt = saved.previewTeams && saved.previewTeams[tiedSlot];
+    if (!pt) return false;
+    for (const sl of ["slot1", "slot2", "slot3"]) {
+      if (pt[sl] && pt[sl].pkmn === pkmnId) return true;
+    }
+    return false;
+  }
+
+  // Capture-phase right-click / long-press blocker that stops the game's
+  // tooltip.js contextmenu handler from opening the Pokémon editor on
+  // any team sprite during an active frontier run.
+  //
+  // Two independent rules:
+  //   • Scope to #explore-team (combat sidebar) + #team-preview
+  //     (team-menu) during a run — covers sprites regardless of which
+  //     species they depict.
+  //   • Any element whose data-pkmn-editor VALUE matches a species in
+  //     the tied run-team is blocked anywhere (dex, storage, genetics,
+  //     party overview) so you can't bypass the lock by looking up the
+  //     mon through a different screen.
   function installFrontierRightClickBlock() {
     if (window.__frontierExtContextBlock) return;
     window.__frontierExtContextBlock = true;
@@ -5607,6 +5739,10 @@
         ? e.target.closest("[data-pkmn-editor]")
         : null;
       if (!target) return false;
+      // Rule 1: anywhere, if the sprite points to a run-team species.
+      const pkmnId = target.dataset && target.dataset.pkmnEditor;
+      if (isPkmnInActiveRunTeam(pkmnId)) return true;
+      // Rule 2: anywhere inside team-preview / explore-team containers.
       const exploreTeam = document.getElementById("explore-team");
       const teamPreview = document.getElementById("team-preview");
       return (exploreTeam && exploreTeam.contains(target))
