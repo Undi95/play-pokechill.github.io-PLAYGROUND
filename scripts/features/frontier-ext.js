@@ -235,6 +235,39 @@
     },
   ];
 
+  // ─── BRAIN ROLE LABEL ("Meneur / Meneuse de Zone") ───────────────────────
+  // The canonical "Frontier Brain" wording is gender-neutral in EN but
+  // needs a feminine form in FR for the 3 female brains (Anabel, Greta/
+  // Gabrielle, Lucy/Lucie). These helpers centralise the label so every
+  // banner / modal / tooltip that says "Cerveau de la Frontière" / "le
+  // Cerveau" switches to the right gendered form based on the facility
+  // brain. English stays simple — one neutral "Zone Leader" everywhere.
+  const FEMALE_BRAIN_IDS = new Set(["anabel", "greta", "lucy"]);
+  function isFemaleBrain(brain) {
+    return !!(brain && brain.id && FEMALE_BRAIN_IDS.has(brain.id));
+  }
+  // "Meneur de Zone" / "Meneuse de Zone" — bare role label, no article.
+  function meneurLabelFr(brain) {
+    return isFemaleBrain(brain) ? "Meneuse de Zone" : "Meneur de Zone";
+  }
+  // "le Meneur de Zone" / "la Meneuse de Zone" — with lowercase article.
+  // `cap` = true for sentence-start form ("Le Meneur de Zone ...").
+  function meneurArticledFr(brain, cap) {
+    const art = isFemaleBrain(brain) ? "la" : "le";
+    const label = meneurLabelFr(brain);
+    return (cap ? art[0].toUpperCase() + art.slice(1) : art) + " " + label;
+  }
+  // "ton Meneur de Zone" / "ta Meneuse de Zone" — possessive form.
+  function meneurPossessiveFr(brain) {
+    return isFemaleBrain(brain) ? "ta Meneuse de Zone" : "ton Meneur de Zone";
+  }
+  // "du Meneur de Zone" / "de la Meneuse de Zone" — for "revanche de X"
+  // and similar constructions where French contracts "de le" → "du".
+  function meneurDeFr(brain) {
+    return isFemaleBrain(brain) ? "de la Meneuse de Zone" : "du Meneur de Zone";
+  }
+  function zoneLeaderEn() { return "Zone Leader"; }
+
   // ─── 2. BRAIN BATTLE TRIGGERS ─────────────────────────────────────────────
   // Same for every facility per user spec:
   //   round 7   → Silver Symbol (first brain fight)
@@ -3008,9 +3041,14 @@
       return;
     }
 
+    // Gendered role label for this facility's brain (Anabel / Greta /
+    // Lucy get "Meneuse de Zone", the rest get "Meneur de Zone").
+    const meneurRole = meneurLabelFr(facility.brain);
+    const meneurArtLow = meneurArticledFr(facility.brain, false);
+
     const t = lang === "fr"
       ? {
-          brain: "Cerveau :",
+          brain: `${meneurRole} :`,
           maxStreak: "Meilleure série :",
           inProgress: "Série en cours",
           start: "Commencer une série",
@@ -3022,12 +3060,12 @@
           // threshold of THIS facility (not a hardcoded 7/49). For
           // rematches we include the multiplier so the player sees
           // "×2" / "×3" escalation at a glance.
-          silverBanner: (r)    => `⚡ Round ${r} — le Cerveau de la Frontière (Argent) t'attend !`,
-          goldBanner:   (r)    => `💎 Round ${r} — le Cerveau de la Frontière (Or) t'attend !`,
-          rematchBanner:(r, m) => `🔥 Round ${r} — revanche du Cerveau ×${m} !`,
+          silverBanner: (r)    => `⚡ Round ${r} — ${meneurArtLow} (Argent) t'attend !`,
+          goldBanner:   (r)    => `💎 Round ${r} — ${meneurArtLow} (Or) t'attend !`,
+          rematchBanner:(r, m) => `🔥 Round ${r} — revanche ${meneurDeFr(facility.brain)} ×${m} !`,
         }
       : {
-          brain: "Brain:",
+          brain: `${zoneLeaderEn()}:`,
           maxStreak: "Best streak:",
           inProgress: "Run in progress",
           start: "Start a run",
@@ -3035,9 +3073,9 @@
           rest: "Rest",
           abandon: "Abandon",
           round: "Round",
-          silverBanner: (r)    => `⚡ Round ${r} — the Frontier Brain (Silver) is next!`,
-          goldBanner:   (r)    => `💎 Round ${r} — the Frontier Brain (Gold) is next!`,
-          rematchBanner:(r, m) => `🔥 Round ${r} — Brain rematch ×${m}!`,
+          silverBanner: (r)    => `⚡ Round ${r} — the ${zoneLeaderEn()} (Silver) is next!`,
+          goldBanner:   (r)    => `💎 Round ${r} — the ${zoneLeaderEn()} (Gold) is next!`,
+          rematchBanner:(r, m) => `🔥 Round ${r} — ${zoneLeaderEn()} rematch ×${m}!`,
         };
 
     const maxStreak = saved.frontierExt.maxStreaks[facility.id] || 0;
@@ -3667,17 +3705,19 @@
     let bossBannerHtml = "";
     if (bossInfoForBanner) {
       const multStr = bossInfoForBanner.multiplier > 1 ? ` ×${bossInfoForBanner.multiplier}` : "";
+      const roleFr = meneurLabelFr(facility.brain);
+      const revancheFr = `Revanche ${meneurDeFr(facility.brain)}`;
       const label = lang === "fr"
         ? (bossInfoForBanner.kind === "silver"
-            ? "⚡ Cerveau de la Frontière (Argent) — équipe canonique, talent caché"
+            ? `⚡ ${roleFr} (Argent) — équipe canonique, talent caché`
             : bossInfoForBanner.kind === "gold"
-              ? "💎 Cerveau de la Frontière (Or) — équipe upgradée, full IV"
-              : `🔥 Revanche du Cerveau${multStr} — équipe renforcée, multiplicateur actif`)
+              ? `💎 ${roleFr} (Or) — équipe upgradée, full IV`
+              : `🔥 ${revancheFr}${multStr} — équipe renforcée, multiplicateur actif`)
         : (bossInfoForBanner.kind === "silver"
-            ? "⚡ Frontier Brain (Silver) — canonical team, hidden ability"
+            ? `⚡ ${zoneLeaderEn()} (Silver) — canonical team, hidden ability`
             : bossInfoForBanner.kind === "gold"
-              ? "💎 Frontier Brain (Gold) — upgraded team, max IVs"
-              : `🔥 Brain rematch${multStr} — enhanced team, multiplier active`);
+              ? `💎 ${zoneLeaderEn()} (Gold) — upgraded team, max IVs`
+              : `🔥 ${zoneLeaderEn()} rematch${multStr} — enhanced team, multiplier active`);
       bossBannerHtml = `<div style="padding:0.35rem 0.8rem;color:#ffd700;font-weight:bold;font-size:0.95rem;text-shadow:0 0 5px rgba(255,215,0,0.5);border-left:3px solid rgba(255,215,0,0.55);margin:0.3rem 0.5rem;">${label}</div>`;
     } else if (miniBoss) {
       const miniBossLabel = lang === "fr"
@@ -3981,7 +4021,7 @@
     const t = lang === "fr"
       ? {
           rules: "Règles",
-          brain: "Cerveau de la Frontière",
+          brain: meneurLabelFr(facility.brain),
           silverAt: "Symbole Argent",
           goldAt: "Symbole Or",
           teamSilver: "Équipe Argent",
@@ -3991,7 +4031,7 @@
         }
       : {
           rules: "Rules",
-          brain: "Frontier Brain",
+          brain: zoneLeaderEn(),
           silverAt: "Silver Symbol",
           goldAt: "Gold Symbol",
           teamSilver: "Silver Team",
@@ -5515,7 +5555,7 @@
           floor: "Étage",
           hpStatus: "État de l'équipe",
           hintStart: "Explore l'étage — clique une case adjacente pour avancer.",
-          hintFinal: "Étage final — le Cerveau t'attend près de l'escalier.",
+          hintFinal: `Étage final — ${meneurArticledFr(facility.brain, false)} t'attend près de l'escalier.`,
           abandon: "Abandonner",
         }
       : {
@@ -5523,7 +5563,7 @@
           floor: "Floor",
           hpStatus: "Team status",
           hintStart: "Explore the floor — click an adjacent tile to move.",
-          hintFinal: "Final floor — the Brain is waiting near the stairs.",
+          hintFinal: `Final floor — the ${zoneLeaderEn()} is waiting near the stairs.`,
           abandon: "Abandon",
         };
 
@@ -5825,9 +5865,10 @@
       room: "Salle",
       round: "Round",
       team: "Équipe",
-      brainRoom: "Salle finale — le Cerveau de la Frontière t'attend !",
+      // Pike brain is Lucy (female) — feminine forms hardcoded.
+      brainRoom: "Salle finale — la Meneuse de Zone t'attend !",
       toughRoom: "Salle finale — un dresseur d'élite garde la sortie.",
-      bossBanner: "⚡ Cerveau imminent !",
+      bossBanner: "⚡ Meneuse imminente !",
       healFullTitle: "Infirmière rencontrée !",
       healFullBody: "Toute ton équipe récupère 100% de ses PV et ses statuts sont soignés.",
       healHalfTitle: "Source de soin",
@@ -5838,7 +5879,7 @@
       cancel: "Retour",
       back: "Retour",
       abandon: "Abandonner",
-      fightBrain: "Affronter le Cerveau",
+      fightBrain: "Affronter la Meneuse",
       fightTough: "Engager le combat",
       statusPoisoned: "Empoisonné",
       statusBurn: "Brûlé",
@@ -5850,9 +5891,9 @@
       room: "Room",
       round: "Round",
       team: "Team",
-      brainRoom: "Final room — the Frontier Brain awaits!",
+      brainRoom: "Final room — the Zone Leader awaits!",
       toughRoom: "Final room — an elite trainer guards the exit.",
-      bossBanner: "⚡ Brain incoming!",
+      bossBanner: "⚡ Zone Leader incoming!",
       healFullTitle: "Nurse encounter!",
       healFullBody: "Your whole team heals to 100% HP and any status is cured.",
       healHalfTitle: "Healing spring",
@@ -5863,7 +5904,7 @@
       cancel: "Back",
       back: "Back",
       abandon: "Abandon",
-      fightBrain: "Face the Brain",
+      fightBrain: "Face the Zone Leader",
       fightTough: "Start the fight",
       statusPoisoned: "Poisoned",
       statusBurn: "Burned",
@@ -6348,6 +6389,10 @@
     const nextRound = run.round + 1;
     const bossInfo = getBossRoundInfo(nextRound, facility);
 
+    // Gendered label for this facility's brain — drives silver/gold/
+    // rematch banners so Anabel/Greta/Lucy surface as "Meneuse" and the
+    // rest as "Meneur".
+    const meneurArtLowCleared = meneurArticledFr(facility.brain, false);
     const t = lang === "fr"
       ? {
           headline: "Round terminé !",
@@ -6357,9 +6402,9 @@
           best: "Record",
           next: "Round suivant",
           normal: "Dresseur standard",
-          silver: "⚡ Le Cerveau de la Frontière (Argent) t'attend !",
-          gold: "💎 Le Cerveau de la Frontière (Or) t'attend !",
-          rematch: "🔥 Revanche du Cerveau ×" + (bossInfo && bossInfo.multiplier),
+          silver: `⚡ ${meneurArticledFr(facility.brain, true)} (Argent) t'attend !`,
+          gold:   `💎 ${meneurArticledFr(facility.brain, true)} (Or) t'attend !`,
+          rematch:`🔥 Revanche ${meneurDeFr(facility.brain)} ×` + (bossInfo && bossInfo.multiplier),
           continue: "Continuer — Round " + nextRound,
           rest: "Repos",
           abandon: "Abandonner",
@@ -6375,9 +6420,9 @@
           best: "Best",
           next: "Next round",
           normal: "Standard trainer",
-          silver: "⚡ The Frontier Brain (Silver) is next!",
-          gold: "💎 The Frontier Brain (Gold) is next!",
-          rematch: "🔥 Brain rematch ×" + (bossInfo && bossInfo.multiplier),
+          silver: `⚡ The ${zoneLeaderEn()} (Silver) is next!`,
+          gold:   `💎 The ${zoneLeaderEn()} (Gold) is next!`,
+          rematch:`🔥 ${zoneLeaderEn()} rematch ×` + (bossInfo && bossInfo.multiplier),
           continue: "Continue — Round " + nextRound,
           rest: "Rest",
           abandon: "Abandon",
@@ -8240,6 +8285,12 @@
     simulateNatureFor,
     buildMoveCategories,
     weatherFromAbility,
+    meneurLabelFr,
+    meneurArticledFr,
+    meneurDeFr,
+    meneurPossessiveFr,
+    zoneLeaderEn,
+    isFemaleBrain,
     FACILITIES,
     // Pool debug
     getPool,
