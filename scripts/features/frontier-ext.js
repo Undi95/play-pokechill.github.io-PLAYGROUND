@@ -2577,6 +2577,39 @@
         font-style: italic;
         padding: 0.4rem;
       }
+      .frontier-ext-pyr-target-card.equipped-here {
+        border-color: #ffd700;
+        background: linear-gradient(180deg, #4a3a18 0%, #32220c 100%);
+      }
+      .frontier-ext-pyr-target-card .equipped {
+        font-size: 0.72rem;
+        opacity: 0.8;
+        font-style: italic;
+      }
+      .frontier-ext-pyr-target-card .here-pill {
+        font-size: 0.7rem;
+        color: #ffd700;
+        font-weight: bold;
+      }
+      .frontier-ext-pyr-bag-row .held-equipped-badge {
+        display: inline-block;
+        margin-left: 0.15rem;
+        color: #ffd700;
+        font-size: 0.85rem;
+      }
+      .frontier-ext-pyr-toast {
+        position: absolute;
+        bottom: 0.6rem;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.82);
+        color: #ffd98a;
+        padding: 0.3rem 0.6rem;
+        border-radius: 0.25rem;
+        font-size: 0.85rem;
+        pointer-events: none;
+        border: 1px solid rgba(255, 210, 130, 0.3);
+      }
       /* Pyramid modal gets the same size override as Factory. */
       #tooltipBox.frontier-ext-pyramid-open {
         max-height: 92vh !important;
@@ -7035,15 +7068,38 @@
     if (!Array.isArray(run.combatBag.items)) run.combatBag.items = [];
     return run.combatBag;
   }
-  // Try to add one unit of `id` to the bag. Returns true if stored, false
-  // if the bag is at capacity AND the id isn't already represented.
+  // Try to add one unit of `id` to the bag. Semantics differ by kind:
+  //   • Consumables: stack freely (count increments).
+  //   • Held items : do NOT stack — a duplicate pickup is refused
+  //                  (returns false). The bag is a registry of owned
+  //                  held types; a Pokémon can carry a held item
+  //                  without removing it from the bag (bag = ownership
+  //                  list, slot.item = active equipment).
+  // Returns true if stored, false if either the bag is at distinct-id
+  // capacity OR the incoming id is a held item the player already has.
   function pyramidAddToBag(run, id) {
     const bag = pyramidEnsureBag(run);
+    const def = pyramidItemDef(id);
+    const isHeld = def && def.kind === "held";
     const existing = bag.items.find((it) => it.id === id);
-    if (existing) { existing.count = (existing.count || 1) + 1; return true; }
+    if (existing) {
+      if (isHeld) return false;            // held items can't stack
+      existing.count = (existing.count || 1) + 1;
+      return true;
+    }
     if (bag.items.length >= bag.cap) return false;
     bag.items.push({ id, count: 1 });
     return true;
+  }
+
+  // Is this held item currently equipped on any team slot? Used to
+  // annotate the bag UI and prevent double-equip of the same id.
+  function pyramidEquippedSlot(run, id) {
+    if (!run || !run.pikeTeam) return null;
+    for (const sl of ["slot1", "slot2", "slot3"]) {
+      if (run.pikeTeam[sl] && run.pikeTeam[sl].item === id) return sl;
+    }
+    return null;
   }
   function pyramidBagCount(run) {
     const bag = pyramidEnsureBag(run);
@@ -7290,6 +7346,12 @@
     if (!def) { pyramidAfterEvent(facility); return; }
     const bag = pyramidEnsureBag(run);
     const alreadyIn = !!bag.items.find((it) => it.id === itemId);
+    // Held items don't stack — a duplicate pickup is simply abandoned
+    // (the player already owns one and can't acquire a second copy).
+    if (alreadyIn && def.kind === "held") {
+      pyramidAfterEvent(facility);
+      return;
+    }
     if (!alreadyIn && bag.items.length >= bag.cap) {
       showPyramidBagFullPicker(facility, itemId);
       return;
@@ -7513,13 +7575,13 @@
           cap: (n, c) => `Contenu : ${n}/${c}`,
           back: "Retour",
           use: "Utiliser",
-          held: "À équiper" }
+          held: "Équiper" }
       : { title: `${facName} — Combat Bag`,
           empty: "Your bag is empty.",
           cap: (n, c) => `Contents: ${n}/${c}`,
           back: "Back",
           use: "Use",
-          held: "To equip" };
+          held: "Equip" };
 
     if (top) top.style.display = "none";
     if (titleEl) {
@@ -7537,10 +7599,14 @@
             const icon = sprite
               ? `<img src="${sprite}" alt="${label}" style="width:24px;height:24px;image-rendering:pixelated;vertical-align:middle;">`
               : `<span class="frontier-ext-pyr-bag-icon">📦</span>`;
+            const equippedOn = (def && def.kind === "held") ? pyramidEquippedSlot(run, it.id) : null;
             const actionBtn = (def && def.kind === "held")
-              ? `<span class="held-pill">${t.held}</span>`
+              ? `<button class="frontier-ext-action-btn small" data-pyr-equip="${it.id}">${t.held}</button>`
               : `<button class="frontier-ext-action-btn small" data-pyr-use="${it.id}">${t.use}</button>`;
-            return `<li class="frontier-ext-pyr-bag-row"><span class="icon">${icon}</span><span class="label">${label}</span><span class="count">×${it.count}</span>${actionBtn}</li>`;
+            const equippedBadge = equippedOn
+              ? `<span class="held-equipped-badge">★</span>`
+              : "";
+            return `<li class="frontier-ext-pyr-bag-row"><span class="icon">${icon}${equippedBadge}</span><span class="label">${label}</span><span class="count">×${it.count}</span>${actionBtn}</li>`;
           }).join("")
         : `<li class="frontier-ext-pyr-bag-row empty">${t.empty}</li>`;
       mid.innerHTML = `
@@ -7550,6 +7616,9 @@
         </div>`;
       mid.querySelectorAll("[data-pyr-use]").forEach((btn) => {
         btn.onclick = () => showPyramidUseTargetPicker(facility, btn.dataset.pyrUse);
+      });
+      mid.querySelectorAll("[data-pyr-equip]").forEach((btn) => {
+        btn.onclick = () => showPyramidEquipPicker(facility, btn.dataset.pyrEquip);
       });
     }
     if (bottom) {
@@ -7652,6 +7721,153 @@
       });
     }
     if (typeof openTooltip === "function") openTooltip();
+  }
+
+  // Equip picker for held items. Three slot cards showing the current
+  // equipment (or "libre"). Clicking a slot moves the new held item
+  // onto it; if the slot already had an item, that old item is pushed
+  // back into the bag (can fail if the bag is full of distinct ids
+  // AND the returned id isn't already there — guarded + error toast).
+  function showPyramidEquipPicker(facility, itemId) {
+    const run = saved.frontierExt.activeRun;
+    if (!run || !run.pikeTeam) return;
+    const def = pyramidItemDef(itemId);
+    if (!def || def.kind !== "held") { showPyramidBagDialog(facility); return; }
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const itemLabel = lang === "fr" ? def.labelFr : def.labelEn;
+    const titleEl = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+    const t = lang === "fr"
+      ? { title: `Équiper ${itemLabel} sur…`,
+          back: "Annuler",
+          free: "Libre",
+          here: "équipé ici",
+          unequipBtn: "Déséquiper" }
+      : { title: `Equip ${itemLabel} on…`,
+          back: "Cancel",
+          free: "Empty",
+          here: "equipped here",
+          unequipBtn: "Unequip" };
+
+    const currentlyOn = pyramidEquippedSlot(run, itemId);
+
+    if (titleEl) { titleEl.style.display = "block"; titleEl.innerHTML = t.title; }
+    if (mid) {
+      mid.style.display = "block";
+      const cards = ["slot1", "slot2", "slot3"].map((sl) => {
+        const ps = run.pikeTeam[sl];
+        if (!ps || !ps.pkmnId) return "";
+        const monName = typeof format === "function" ? format(ps.pkmnId) : ps.pkmnId;
+        const curItemId = ps.item || null;
+        const curDef = curItemId ? pyramidItemDef(curItemId) : null;
+        const curLabel = curDef ? (lang === "fr" ? curDef.labelFr : curDef.labelEn) : (curItemId || t.free);
+        const isHere = currentlyOn === sl;
+        return `
+          <button class="frontier-ext-pyr-target-card ${isHere ? "equipped-here" : ""}" data-pyr-equip-target="${sl}">
+            <div class="name">${monName}</div>
+            <div class="equipped">${curItemId ? curLabel : `<em>${t.free}</em>`}</div>
+            ${isHere ? `<div class="here-pill">✓ ${t.here}</div>` : ""}
+          </button>`;
+      }).join("");
+      // Add an "unequip" action when this item is already worn on a slot.
+      const unequipBtnHtml = currentlyOn
+        ? `<button class="frontier-ext-action-btn small danger" data-pyr-equip-unequip="1">${t.unequipBtn}</button>`
+        : "";
+      mid.innerHTML = `
+        <div class="frontier-ext-pyr-use-picker">${cards}</div>
+        ${unequipBtnHtml ? `<div class="frontier-ext-pyr-side-actions">${unequipBtnHtml}</div>` : ""}`;
+      mid.querySelectorAll("[data-pyr-equip-target]").forEach((card) => {
+        card.onclick = () => {
+          const slot = card.dataset.pyrEquipTarget;
+          pyramidEquipToSlot(run, slot, itemId);
+          showPyramidBagDialog(facility);
+        };
+      });
+      mid.querySelectorAll("[data-pyr-equip-unequip]").forEach((btn) => {
+        btn.onclick = () => {
+          if (currentlyOn) run.pikeTeam[currentlyOn].item = null;
+          showPyramidBagDialog(facility);
+        };
+      });
+    }
+    if (bottom) {
+      bottom.style.display = "block";
+      bottom.innerHTML = `
+        <div class="frontier-ext-run-actions">
+          <button class="frontier-ext-action-btn" data-pyr-equip-cancel="1">${t.back}</button>
+        </div>`;
+      bottom.querySelectorAll("[data-pyr-equip-cancel]").forEach((btn) => {
+        btn.onclick = () => showPyramidBagDialog(facility);
+      });
+    }
+    if (typeof openTooltip === "function") openTooltip();
+  }
+
+  // Assign the held `itemId` to pikeTeam[slotKey].item. Held items do
+  // NOT consume the bag entry (held stays in bag — see pyramidAddToBag).
+  // If the same id was already equipped on a DIFFERENT slot, we move
+  // it (single copy, single active slot); any item previously on the
+  // target slot is just unequipped (it remains in the bag). Always
+  // succeeds. Returns true.
+  function pyramidEquipToSlot(run, slotKey, itemId) {
+    if (!run || !run.pikeTeam || !run.pikeTeam[slotKey]) return false;
+    // If the item is already equipped on another slot, clear it there.
+    const previouslyOn = pyramidEquippedSlot(run, itemId);
+    if (previouslyOn && previouslyOn !== slotKey) {
+      run.pikeTeam[previouslyOn].item = null;
+    }
+    // The target slot's old item is just un-marked — it's still in the
+    // bag (held items never left it), so nothing to refund.
+    run.pikeTeam[slotKey].item = itemId;
+    return true;
+  }
+
+  // One-shot toast flash inside the current tooltip — lives 2s then
+  // the caller re-renders whatever was underneath. Used for equip
+  // failure feedback so the player gets a readable reason without
+  // a separate modal transition.
+  function flashPyramidBagToast(message) {
+    const titleEl = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    if (!mid) return;
+    const toast = document.createElement("div");
+    toast.className = "frontier-ext-pyr-toast";
+    toast.textContent = message;
+    mid.appendChild(toast);
+    setTimeout(() => { try { toast.remove(); } catch (e) {} }, 2000);
+  }
+
+  // Apply pikeTeam[slot].item onto the live team[slot].item right after
+  // injectPreviewTeam copies the preview team over. The preview has no
+  // items (we block held items at registration), so this is the only
+  // way Pyramid-equipped gear reaches combat.
+  function installPyramidEquipSync() {
+    if (typeof window.injectPreviewTeam !== "function") {
+      setTimeout(installPyramidEquipSync, 200);
+      return;
+    }
+    if (window.__frontierExtPyramidEquipHooked) return;
+    window.__frontierExtPyramidEquipHooked = true;
+    const orig = window.injectPreviewTeam;
+    window.injectPreviewTeam = function () {
+      const res = orig.apply(this, arguments);
+      try {
+        const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
+        if (!run) return res;
+        const fac = FACILITIES.find((f) => f.id === run.facilityId);
+        if (!isPyramidFacility(fac)) return res;
+        if (!run.pikeTeam || typeof team === "undefined") return res;
+        if (saved.currentArea !== RUN_AREA_ID) return res;
+        for (const sl of ["slot1", "slot2", "slot3"]) {
+          const ps = run.pikeTeam[sl];
+          if (!ps || !ps.item) continue;
+          if (!team[sl]) continue;
+          team[sl].item = ps.item;
+        }
+      } catch (e) { console.error("[frontier-ext] pyramid equip sync failed:", e); }
+      return res;
+    };
   }
 
   // ─── 6b3. PIKE RULE — 14 rooms, 3 doors, HP/status persist ───────────────
@@ -10318,6 +10534,7 @@
     installTeamSanitizerHooks();
     installDomeTeamFilter();
     installPikeHpRestoreHook();
+    installPyramidEquipSync();
     installTeamMenuLockHook();
     installTeamMenuObserver();
     installTeamLockEventFilter();
