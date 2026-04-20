@@ -5526,6 +5526,21 @@
     const origOpen = window.openTooltip;
     const origClose = window.closeTooltip;
     const lockClass = "frontier-ext-run-lock-open";
+    // Canonical exit-blocker: tooltip.js:60 and :66 both short-circuit
+    // if a #prevent-tooltip-exit element exists in the DOM, so we plant
+    // an invisible marker whenever a run is active. Handles both the
+    // backdrop-click and Escape-key exits.
+    const ensureBlocker = () => {
+      if (document.getElementById("prevent-tooltip-exit")) return;
+      const el = document.createElement("div");
+      el.id = "prevent-tooltip-exit";
+      el.style.display = "none";
+      document.body.appendChild(el);
+    };
+    const removeBlocker = () => {
+      const el = document.getElementById("prevent-tooltip-exit");
+      if (el) try { el.remove(); } catch (e) {}
+    };
     const apply = () => {
       try {
         const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
@@ -5534,9 +5549,11 @@
         if (run) {
           if (bg)  bg.classList.add(lockClass);
           if (box) box.classList.add(lockClass);
+          ensureBlocker();
         } else {
           if (bg)  bg.classList.remove(lockClass);
           if (box) box.classList.remove(lockClass);
+          removeBlocker();
         }
       } catch (e) { /* ignore */ }
     };
@@ -5551,6 +5568,7 @@
         const box = document.getElementById("tooltipBox");
         if (bg)  bg.classList.remove(lockClass);
         if (box) box.classList.remove(lockClass);
+        removeBlocker();
       } catch (e) { /* ignore */ }
       return origClose.apply(this, arguments);
     };
