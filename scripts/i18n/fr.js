@@ -3089,7 +3089,13 @@ window.i18n.fr.GAME_UI = {
     buffSatk: "ATQ.SP",
     buffSdef: "DEF.SP",
     buffSpe: "VIT",
-    buffZzz: "ZZZ",
+    // NB: la clé `buffZzz` est mal nommée — en amont (UI_TEXT_MAP ligne
+    // 942) elle mappe la pill "SPE ▼▼" vers cette clé, donc la vraie
+    // traduction FR doit être "VIT ▼▼" (Vitesse Down 2). Valeur
+    // précédente "ZZZ" causait l'affichage d'un double "ZZZ" sur les
+    // ennemis paralysés-vitesse + endormis — le sommeil est aussi
+    // rendu "ZZZ" par formatBuffs(sleep) dans explore.js.
+    buffZzz: "VIT ▼▼",
     canBeBoughtInPokeMart: "Peut être acheté au Poke-Mart",
     canBeDroppedDungeonArea:
       "Peut être obtenu dans la zone de donjon {area} (Rotation {rotation})",
