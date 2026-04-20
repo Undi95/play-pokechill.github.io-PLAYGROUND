@@ -3641,9 +3641,11 @@
       // dungeon itself.
       let kinesisteRowHtml = "";
       if (isPyramidFacility(facility)) {
-        const themeForPreview = run
-          ? (run.roundJustCleared ? pyramidNextTheme(run) : pyramidCurrentTheme(run))
-          : PYRAMID_THEMES[0];
+        // pyramidThemeIndex is bumped inside onRunVictory BEFORE
+        // roundJustCleared gets set, so at preview time the "current"
+        // theme is already the one the player is about to play. No
+        // +1 lookup — just read the current slot.
+        const themeForPreview = run ? pyramidCurrentTheme(run) : PYRAMID_THEMES[0];
         const themeLabelPreview = lang === "fr" ? themeForPreview.labelFr : themeForPreview.labelEn;
         const introLine = lang === "fr"
           ? "🔮 La Kinésiste murmure : « Je sens le prochain thème… »"
@@ -7233,7 +7235,16 @@
     }
     return null;
   }
+  // Distinct-id count — what the bag's cap actually limits. The UI
+  // shows this number against PYRAMID_BAG_CAP so "Contenu : 8/10"
+  // reflects the rule "ne peut contenir que 10 objets différents".
   function pyramidBagCount(run) {
+    const bag = pyramidEnsureBag(run);
+    return bag.items.length;
+  }
+  // Total-unit count (sum of stacks). Only used when we actually want
+  // the number of physical items the player is carrying.
+  function pyramidBagTotalUnits(run) {
     const bag = pyramidEnsureBag(run);
     return bag.items.reduce((n, it) => n + (it.count || 0), 0);
   }
