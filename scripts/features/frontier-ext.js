@@ -171,7 +171,7 @@
         id: "noland",
         sprite: "factory_head_noland",
         nameEn: "Factory Head Noland",
-        nameFr: "Maître de l'Usine Philémon",
+        nameFr: "Maître de l'Usine Sam",
         teamSilver: null, // Noland uses random rentals himself, like the player
         teamGold: null,
       },
