@@ -3315,9 +3315,13 @@
     const pausedLabel = lang === "fr" ? "EN PAUSE" : "PAUSED";
     let inProgressTag = "";
     if (isActiveHere) {
-      inProgressTag = `<span class="frontier-ext-inprogress-tag" title="Run ${tileRun.round + 1}/${nextGoalRoundFor(tileRun.round + 1, facility)}">● ${activeLabel}</span>`;
+      const r = tileRun.round + 1, goal = nextGoalRoundFor(r, facility);
+      const tip = lang === "fr" ? `Série ${r}/${goal}` : `Run ${r}/${goal}`;
+      inProgressTag = `<span class="frontier-ext-inprogress-tag" title="${tip}">● ${activeLabel}</span>`;
     } else if (isPausedHere) {
-      inProgressTag = `<span class="frontier-ext-paused-tag" title="Paused at round ${tileRun.round + 1}">⏸ ${pausedLabel}</span>`;
+      const r = tileRun.round + 1;
+      const tip = lang === "fr" ? `En pause au round ${r}` : `Paused at round ${r}`;
+      inProgressTag = `<span class="frontier-ext-paused-tag" title="${tip}">⏸ ${pausedLabel}</span>`;
     }
     // "🔥 Difficulté croissante" sticker: lights up on the facility tile
     // as soon as the run (active OR paused) is past Gold with a
@@ -3358,8 +3362,8 @@
           </span>
           <span>
             <strong class="frontier-ext-streak">${streakLabel}: ${streak} / ${maxLabel}: ${maxStreak}</strong>
-            <span class="frontier-ext-symbol ${silverClass}" title="Silver Symbol (round ${silverRoundFor(facility)})">●</span>
-            <span class="frontier-ext-symbol ${goldClass}" title="Gold Symbol (round ${goldRoundFor(facility)})">●</span>
+            <span class="frontier-ext-symbol ${silverClass}" title="${lang === "fr" ? `Symbole Argent (round ${silverRoundFor(facility)})` : `Silver Symbol (round ${silverRoundFor(facility)})`}">●</span>
+            <span class="frontier-ext-symbol ${goldClass}" title="${lang === "fr" ? `Symbole Or (round ${goldRoundFor(facility)})` : `Gold Symbol (round ${goldRoundFor(facility)})`}">●</span>
             ${inProgressTag}
             ${heatTag}
           </span>
@@ -3370,7 +3374,7 @@
         <img class="explore-ticket-sprite sprite-trim frontier-ext-brain-icon"
              style="z-index: 10;"
              src="img/trainers/${facility.brain.sprite}.png"
-             alt="${facility.brain.nameEn}">
+             alt="${lang === "fr" ? facility.brain.nameFr : facility.brain.nameEn}">
       </div>
     `;
 
