@@ -4673,6 +4673,14 @@
     } catch (e) { /* ignore */ }
 
     // Freeze combat ticks during the pause, then deliver the KO + reset.
+    // Note: judgeFiring stays TRUE past the KO on a player-wins verdict.
+    // The installArenaSwapFreeze wrap on setWildPkmn detects that the
+    // post-verdict spawn is the "bridge" case (judgeFiring true when
+    // setWildPkmn fires), extends the freeze for ARENA_SWAP_FREEZE_MS,
+    // then clears everything. This closes the ~1s gap between the
+    // vanilla respawnTimer (1000ms default) and our post-spawn
+    // invincibility window — during which the rAF loop would unfreeze
+    // and pachirisu could squeeze an attack in.
     const globalEval = eval;
     setTimeout(() => {
       try {
@@ -4734,7 +4742,19 @@
       // Reset matchup counters. The active-slot change detection in the
       // combat hooks will also catch the switch — this is belt+braces.
       arenaResetMatchup(state);
-      state.judgeFiring = false;
+      // Flag clearing is split by branch:
+      //   • playerWins: KEEP judgeFiring=true. The game will spawn a
+      //     new enemy via setTimeout → setWildPkmn; our setWildPkmn
+      //     wrap detects this bridge case and extends the freeze for
+      //     ARENA_SWAP_FREEZE_MS before clearing everything. Without
+      //     this, there's a ~1s window between judgeFiring=false and
+      //     setWildPkmn firing during which animate's rAF loop
+      //     un-freezes and Pachirisu can slip an attack in.
+      //   • playerLoses: the player's own team advances (switchMemberNext)
+      //     — no setWildPkmn fires, no bridge needed. Clear right away.
+      if (!playerWins) {
+        state.judgeFiring = false;
+      }
     }, ARENA_PAUSE_MS);
   }
 
@@ -4797,11 +4817,25 @@
           state.initialLoadSeen = true;
           return res;
         }
-        // Raise the swap invincibility flag. shouldCombatStop wrap reads
-        // this and returns true for ARENA_SWAP_FREEZE_MS, so no damage
-        // can land on either side during the spawn animation.
-        state.arenaSwapFreezing = true;
-        setTimeout(() => { state.arenaSwapFreezing = false; }, ARENA_SWAP_FREEZE_MS);
+        // Two cases:
+        //   • Bridge case — judgeFiring is STILL true (player won the
+        //     verdict, the KO triggered respawnTimer → setWildPkmn here).
+        //     arenaRenderJudge deliberately kept judgeFiring up to close
+        //     the gap. We extend it for another ARENA_SWAP_FREEZE_MS of
+        //     post-spawn invincibility, then clear BOTH flags at once.
+        //   • Natural swap — enemy just died from regular combat (not
+        //     from a verdict). judgeFiring is already false. Fire the
+        //     usual 1s invincibility window via arenaSwapFreezing.
+        if (state.judgeFiring) {
+          setTimeout(() => {
+            state.judgeFiring = false;
+            state.arenaSwapFreezing = false;
+          }, ARENA_SWAP_FREEZE_MS);
+          state.arenaSwapFreezing = true;
+        } else {
+          state.arenaSwapFreezing = true;
+          setTimeout(() => { state.arenaSwapFreezing = false; }, ARENA_SWAP_FREEZE_MS);
+        }
       } catch (e) { console.error("[frontier-ext] arena swap freeze failed:", e); }
       return res;
     };
