@@ -2795,20 +2795,32 @@
       .frontier-ext-pike-hint.revealed {
         flex-direction: column;
         align-items: center;
-        gap: 0.15rem;
-        padding: 0.45rem 0.8rem 0.2rem;
-        color: #f2d999;
+        gap: 0.2rem;
+        margin: 0.3rem 0.8rem;
+        padding: 0.45rem 0.8rem;
+        background: rgba(0, 0, 0, 0.55);
+        border: 1px solid rgba(255, 210, 130, 0.35);
+        border-radius: 0.35rem;
+        color: #fff4d8;
         font-style: italic;
-        font-size: 0.88rem;
+        font-size: 0.95rem;
         text-align: center;
+        line-height: 1.35;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
       }
       .frontier-ext-pike-hint.revealed .intro {
+        display: block;
         color: #ffd87a;
         font-weight: bold;
-        font-size: 0.82rem;
-        letter-spacing: 0.03em;
+        font-size: 0.9rem;
+        font-style: normal;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
       }
-      .frontier-ext-pike-hint.revealed .text { opacity: 0.9; }
+      .frontier-ext-pike-hint.revealed .text {
+        opacity: 1;
+        color: #fff4d8;
+      }
       .frontier-ext-pike-door {
         position: relative;
         width: 6.2rem;
