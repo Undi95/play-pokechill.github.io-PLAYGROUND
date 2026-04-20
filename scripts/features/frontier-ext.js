@@ -8606,6 +8606,26 @@
         if (!saved || !saved.frontierExt) return false;
         const run = saved.frontierExt.activeRun;
         if (!run) return true;
+        // If the active run is flagged `roundJustCleared` at boot, the
+        // player had won a round and the auto-save captured them
+        // between the Round-Cleared modal and any Rest/Continue click.
+        // Promote that state to a paused run instead of forfeiting —
+        // mirrors what they almost certainly intended and avoids
+        // losing a long streak just because F5 happened within the
+        // 60s auto-save window. Active run without roundJustCleared
+        // (mid-combat reload) still forfeits as before.
+        if (run.roundJustCleared) {
+          if (!saved.frontierExt.pausedRuns) saved.frontierExt.pausedRuns = {};
+          saved.frontierExt.pausedRuns[run.facilityId] = run;
+          saved.frontierExt.activeRun = null;
+          try { restoreEnemyRuntimeStats(run); } catch (e) { /* ignore */ }
+          const facP = FACILITIES.find((f) => f.id === run.facilityId);
+          if (facP && isFactoryFacility(facP)) {
+            try { cleanupFactoryRun(run); } catch (e) { /* ignore */ }
+          }
+          try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
+          return true;
+        }
         const finalRound = run.round || 0;
         if (finalRound > (saved.frontierExt.maxStreaks[run.facilityId] || 0)) {
           saved.frontierExt.maxStreaks[run.facilityId] = finalRound;
