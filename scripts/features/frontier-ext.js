@@ -456,11 +456,11 @@
   // has numeric-turn entries for `poisoned` / `burn` / `paralysis` /
   // `sleep` / `freeze` (explore.js:2566 / 2590 / 2345 etc.). `poisoned`
   // is the canonical form — NOT "poison".
-  const PIKE_TRAP_STATUSES = ["poisoned", "burn", "paralysis", "sleep", "freeze"];
+  const PIKE_PYRAMID_STATUSES = ["poisoned", "burn", "paralysis", "sleep", "freeze"];
   // Large turn count so a Pike-applied buff persists across an entire
   // battle without wearing off. The game decrements the counter per turn
   // but never refills it — 99 turns is effectively infinite for a round.
-  const PIKE_STATUS_TURNS = 99;
+  const PIKE_PYRAMID_STATUS_TURNS = 99;
 
   // Canonical Gen 3 Pike species-status inflictors. Each species in a
   // status_species door rolls one of its configured statuses and applies
@@ -537,10 +537,21 @@
   // Any facility whose rules opt into `persistHpStatus` reuses the Pike
   // HP/status machinery — same runTeam snapshot, same apply hook on
   // initialiseArea, same post-leaveCombat snapshot, same slot pills.
-  //   • Pike  : rooms 1..14 share HP/status state.
-  //   • Tower : battles 1..7 of a set share HP/status state — canonical
-  //             Gen 3 "no free heal between battles" feel.
-  //   • Future facilities (Pyramid, etc.) can opt in by flagging the rule.
+  //   • Pike    : rooms 1..14 share HP/status state.
+  //   • Pyramid : floors 1..7 share HP/status state.
+  //   • Tower   : battles 1..7 of a set share HP/status state —
+  //               canonical Gen 3 "no free heal between battles" feel.
+  //   • Future facilities can opt in by flagging the same rule.
+  //
+  // NAMING CONVENTION (adopted during the Pike/Pyramid split cleanup):
+  //   • `runTeam` / `persistHpStatus` concept : shared machinery
+  //   • Functions touching this shared state are prefixed
+  //     `pikePyramid…` (e.g. snapshotPikePyramidHp) so PR reviewers
+  //     can tell at a glance what's dual-use vs facility-specific.
+  //   • Pike-only helpers keep the `pike` prefix.
+  //   • Pyramid-only helpers keep the `pyramid` prefix.
+  //   • The storage field `run.pikeTeam` intentionally retains its
+  //     original name for save back-compat.
   function hasRunTeamState(facility) {
     return !!(facility && facility.rules && facility.rules.persistHpStatus);
   }
@@ -570,7 +581,7 @@
   // `team[sl].buffs.poisoned`). Any save made before that fix still has
   // "poison" stuck in its cached doors and run.pikeStatus, so we migrate
   // at boot and in a defensive inline normalizer.
-  function normalizePikeStatus(st) {
+  function normalizePikePyramidStatus(st) {
     if (st === "poison") return "poisoned";
     return st;
   }
@@ -580,18 +591,18 @@
     if (!run) return;
     if (run.pikeStatus) {
       for (const sl of Object.keys(run.pikeStatus)) {
-        run.pikeStatus[sl] = normalizePikeStatus(run.pikeStatus[sl]);
+        run.pikeStatus[sl] = normalizePikePyramidStatus(run.pikeStatus[sl]);
       }
     }
     if (Array.isArray(run.pikeDoors)) {
       for (const d of run.pikeDoors) {
         if (d && d.data && typeof d.data.status === "string") {
-          d.data.status = normalizePikeStatus(d.data.status);
+          d.data.status = normalizePikePyramidStatus(d.data.status);
         }
       }
     }
     // Upgrade split pikeHpState / pikeStatus → unified run.pikeTeam.
-    migratePikeTeam();
+    migratePikePyramidTeam();
   }
 
   // Classic red-velvet curtain, hand-built SVG (no raster dependency). Shape
@@ -4347,11 +4358,11 @@
       // Pike: snapshot the player's active preview team into the per-run
       // Pike team state before entering any room. This is the source of
       // truth for HP/status persistence across every combat of the run.
-      if (isPikeFacility(facility)) initPikeTeamFromPreview();
+      if (isPikeFacility(facility)) initPikePyramidTeamFromPreview();
       // Pyramid also needs the runTeam snapshot (HP/status persist via
       // the same pikeTeam structure — facility has persistHpStatus flag).
       if (isPyramidFacility(facility)) {
-        initPikeTeamFromPreview();
+        initPikePyramidTeamFromPreview();
         const newRun = saved.frontierExt.activeRun;
         // Init theme index + Combat Bag. The theme index only advances
         // on successful round clears; losing a run nulls activeRun and
@@ -4397,7 +4408,7 @@
       // soon as the player commits to the next round preview.
       if (run) run.roundJustCleared = false;
       // Pike: re-snapshot team in case the player edited between rounds.
-      if (isPikeFacility(facility)) initPikeTeamFromPreview();
+      if (isPikeFacility(facility)) initPikePyramidTeamFromPreview();
       if (isDomeFacility(facility)) openDomeBracketPreview(facility);
       else if (isPikeFacility(facility)) openPikeRoomPreview(facility);
       else if (isFactoryFacility(facility) && !run.factoryTeam) {
@@ -4409,13 +4420,11 @@
       return;
     }
     if (action === "pike-next") {
-      // Pyramid reuses the Pike heal/trap event modals — after the
-      // player clicks "Next", route back to the floor map instead of
-      // advancing a Pike room.
-      if (isPyramidFacility(facility)) {
-        pyramidAfterEvent(facility);
-        return;
-      }
+      // PIKE-ONLY. Pyramid has its own dedicated modal flow (item-
+      // found, bag view, equip picker, use picker) with their own
+      // action keys (pyr-*), and never dispatches pike-next. The
+      // legacy Pyramid branch here became unreachable after the
+      // Pyramid rework removed heal/cure tiles.
       pikeAdvanceAfterEvent(facility);
       return;
     }
@@ -4461,7 +4470,7 @@
       if (isPikeFacility(facility) || isPyramidFacility(facility)) {
         // Both Pike and Pyramid share the runTeam structure for HP/status
         // persist — re-snapshot in case the player edited between rounds.
-        initPikeTeamFromPreview();
+        initPikePyramidTeamFromPreview();
       }
       if (isFactoryFacility(facility)) {
         restoreFactoryMoves(run);
@@ -5616,7 +5625,7 @@
         if (turnOverride === undefined
             && typeof buff === "string" && STATUS_RX.test(buff)
             && isInPyramidRun()) {
-          return orig.call(this, target, buff, mod, PIKE_STATUS_TURNS);
+          return orig.call(this, target, buff, mod, PIKE_PYRAMID_STATUS_TURNS);
         }
       } catch (e) { /* fall through to orig */ }
       return orig.apply(this, arguments);
@@ -7000,7 +7009,7 @@
   function renderFrontierTeamHpSummary() {
     const run = saved.frontierExt.activeRun;
     if (!run) return "";
-    migratePikeTeam();
+    migratePikePyramidTeam();
     if (!run.pikeTeam) return "";
     const l = pikeL10n();
     const statusLabel = {
@@ -7012,7 +7021,7 @@
       const ps = run.pikeTeam[sl];
       if (!ps || !ps.pkmnId) continue;
       const ratio = (typeof ps.hpRatio === "number") ? ps.hpRatio : 1.0;
-      const status = ps.status ? normalizePikeStatus(ps.status) : null;
+      const status = ps.status ? normalizePikePyramidStatus(ps.status) : null;
       const pct = Math.round(ratio * 100);
       const barWidth = Math.max(0, Math.min(100, pct));
       const cls = ratio <= 0 ? "low" : (ratio <= 0.25 ? "low" : (ratio <= 0.5 ? "mid" : ""));
@@ -8221,9 +8230,9 @@
   //     slot2: {...},
   //     slot3: {...},
   //   }
-  // hpRatio is 0..1 (1.0 = full HP). status is one of PIKE_TRAP_STATUSES
+  // hpRatio is 0..1 (1.0 = full HP). status is one of PIKE_PYRAMID_STATUSES
   // or null.
-  function initPikeTeamFromPreview() {
+  function initPikePyramidTeamFromPreview() {
     ensureSaveSlot();
     const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
     if (!run) return;
@@ -8245,7 +8254,7 @@
   // One-time migration for saves that were started before run.pikeTeam
   // existed — rebuild it from the legacy pikeHpState / pikeStatus + the
   // preview team slot, so the run can resume without losing progress.
-  function migratePikeTeam() {
+  function migratePikePyramidTeam() {
     const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
     if (!run) return;
     if (run.pikeTeam) return; // already migrated
@@ -8263,7 +8272,7 @@
         pkmnId: pt[sl].pkmn,
         item: pt[sl].item || null,
         hpRatio: (typeof hp === "number") ? hp : 1.0,
-        status: st ? normalizePikeStatus(st) : null,
+        status: st ? normalizePikePyramidStatus(st) : null,
       };
     }
   }
@@ -8406,7 +8415,7 @@
   function renderPikeHpSummary() {
     const run = saved.frontierExt.activeRun;
     if (!run) return "";
-    migratePikeTeam();
+    migratePikePyramidTeam();
     const l = pikeL10n();
     const statusLabel = {
       poisoned: l.statusPoisoned, burn: l.statusBurn, paralysis: l.statusParalysis,
@@ -8418,7 +8427,7 @@
       const ps = source[sl];
       if (!ps || !ps.pkmnId) continue;
       const ratio = (typeof ps.hpRatio === "number") ? ps.hpRatio : 1.0;
-      const status = ps.status ? normalizePikeStatus(ps.status) : null;
+      const status = ps.status ? normalizePikePyramidStatus(ps.status) : null;
       const pct = Math.round(ratio * 100);
       const barWidth = Math.max(0, Math.min(100, pct));
       const cls = ratio <= 0.25 ? "low" : (ratio <= 0.5 ? "mid" : "");
@@ -8680,7 +8689,7 @@
         return;
       }
       case "status_species": {
-        door.data.status = normalizePikeStatus(door.data.status);
+        door.data.status = normalizePikePyramidStatus(door.data.status);
         if (!door.applied) applyPikeStatusSpecies(door.data.status, door.data.count || 1);
         door.applied = true;
         showPikeEventModal(
@@ -8710,7 +8719,7 @@
         return;
       }
       case "trap": {
-        door.data.status = normalizePikeStatus(door.data.status);
+        door.data.status = normalizePikePyramidStatus(door.data.status);
         if (!door.applied) applyPikeTrap(door.data.status);
         door.applied = true;
         showPikeEventModal(facility, "trap", l.statusTitle, `${l.statusTitle} (${statusName(door.data.status)})`, door.data.status);
@@ -8725,7 +8734,7 @@
   // living party members.
   function applyPikeHealPartial(n) {
     const run = saved.frontierExt.activeRun;
-    migratePikeTeam();
+    migratePikePyramidTeam();
     if (!run.pikeTeam) return;
     const alive = ["slot1", "slot2", "slot3"].filter((sl) => {
       const ps = run.pikeTeam[sl];
@@ -8745,13 +8754,13 @@
   }
 
   // Apply a species-triggered status to N Pokémon, respecting type
-  // immunity. `status` is one of the PIKE_TRAP_STATUSES keys; `count` is
+  // immunity. `status` is one of the PIKE_PYRAMID_STATUSES keys; `count` is
   // the room-progression count (1 / 2 / 3). Prefers slots that are alive
   // AND not already statused — if fewer eligible slots exist than the
   // count, applies to as many as possible.
   function applyPikeStatusSpecies(status, count) {
     const run = saved.frontierExt.activeRun;
-    migratePikeTeam();
+    migratePikePyramidTeam();
     if (!run.pikeTeam) return;
     const eligible = ["slot1", "slot2", "slot3"].filter((sl) => {
       const ps = run.pikeTeam[sl];
@@ -8768,7 +8777,7 @@
     }
     const targets = eligible.slice(0, count);
     for (const sl of targets) {
-      run.pikeTeam[sl].status = normalizePikeStatus(status);
+      run.pikeTeam[sl].status = normalizePikePyramidStatus(status);
     }
   }
 
@@ -8777,7 +8786,7 @@
   // (matches Gen 3 Pike — only Nurse rooms cure status).
   function applyPikeHealRatio(ratio) {
     const run = saved.frontierExt.activeRun;
-    migratePikeTeam();
+    migratePikePyramidTeam();
     if (!run.pikeTeam) return;
     for (const sl of ["slot1", "slot2", "slot3"]) {
       const ps = run.pikeTeam[sl];
@@ -8792,12 +8801,12 @@
   // per trap door, matching the Gen 3 Pike one-Pokémon trap rule.
   function applyPikeTrap(status) {
     const run = saved.frontierExt.activeRun;
-    migratePikeTeam();
+    migratePikePyramidTeam();
     if (!run.pikeTeam) return;
     const candidates = ["slot1", "slot2", "slot3"].filter((sl) => run.pikeTeam[sl]);
     if (!candidates.length) return;
     const target = candidates[Math.floor(Math.random() * candidates.length)];
-    run.pikeTeam[target].status = normalizePikeStatus(status);
+    run.pikeTeam[target].status = normalizePikePyramidStatus(status);
   }
 
   // Heal/trap confirmation modal. User clicks "Next room" to advance.
@@ -8813,21 +8822,15 @@
       : "☠️";
     const facName = lang === "fr" ? facility.nameFr : facility.nameEn;
 
-    // Facility-specific context strings — the same Pike modal is reused
-    // for Pyramid item tiles, so the title unit and button label must
-    // switch accordingly (Pyramid = Étage X/7 + "Utiliser" button).
-    const isPyramid = isPyramidFacility(facility);
+    // PIKE-ONLY. The Pyramid used to share this modal for heal/cure
+    // tiles and that required an internal branch to switch the unit
+    // label to "Étage X/7". Those Pyramid tiles are gone (items are
+    // rolled via PYR_TILES.ITEM → showPyramidItemFoundModal), so the
+    // modal is now unambiguously a Pike construct.
     const run = saved.frontierExt.activeRun;
-    let unitLabel, unitValue, nextLabel;
-    if (isPyramid && run && run.pyramid) {
-      unitLabel = lang === "fr" ? "Étage" : "Floor";
-      unitValue = `${run.pyramid.floor}/7`;
-      nextLabel = lang === "fr" ? "Utiliser" : "Use";
-    } else {
-      unitLabel = l.room;
-      unitValue = `${run.pikeRoom}/${PIKE_ROOM_COUNT}`;
-      nextLabel = l.next;
-    }
+    const unitLabel = l.room;
+    const unitValue = `${run.pikeRoom}/${PIKE_ROOM_COUNT}`;
+    const nextLabel = l.next;
 
     if (top) top.style.display = "none";
     if (titleEl) {
@@ -9053,7 +9056,7 @@
   //
   // Emits diagnostic logs so we can confirm the write lands after the
   // game's setPkmnTeamHp reset — toggle with `window.__frontierExt.pikeDebug`.
-  function applyPikeHpStateNow() {
+  function applyPikePyramidHpState() {
     try {
       const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
       if (!run) return;
@@ -9063,7 +9066,7 @@
       // this mechanism). Using hasRunTeamState instead of isPikeFacility
       // extends the HP/status restore to all facilities that opt in.
       if (!hasRunTeamState(fac)) return;
-      migratePikeTeam();
+      migratePikePyramidTeam();
       if (!run.pikeTeam) return;
       if (typeof team === "undefined" || typeof pkmn === "undefined") return;
       const debug = !!window.__frontierExt?.pikeDebug;
@@ -9085,7 +9088,7 @@
 
         // INTEGRITY CHECK — if the Pokémon in this slot has changed since
         // the Pike snapshot (either via a lock bypass or a legitimate
-        // swap between rounds that wasn't captured by initPikeTeamFromPreview),
+        // swap between rounds that wasn't captured by initPikePyramidTeamFromPreview),
         // DO NOT inherit the old Pokémon's HP/status. Reset this slot to
         // full HP + no status, and update pikeTeam to track the new mon.
         if (ps.pkmnId && ps.pkmnId !== team[sl].pkmn.id) {
@@ -9115,11 +9118,11 @@
 
         // Status restore — normalise so legacy keys ("poison") are
         // upgraded before hitting the buff dict.
-        const st = ps.status ? normalizePikeStatus(ps.status) : null;
+        const st = ps.status ? normalizePikePyramidStatus(ps.status) : null;
         if (st) {
           if (!team[sl].buffs) team[sl].buffs = {};
-          if (debug) console.log(`[pike-apply] ${sl}: status ${st} x${PIKE_STATUS_TURNS}`);
-          team[sl].buffs[st] = PIKE_STATUS_TURNS;
+          if (debug) console.log(`[pike-apply] ${sl}: status ${st} x${PIKE_PYRAMID_STATUS_TURNS}`);
+          team[sl].buffs[st] = PIKE_PYRAMID_STATUS_TURNS;
           appliedAny = true;
         }
       }
@@ -9253,14 +9256,14 @@
           ratio = Math.max(0, Math.min(1, (pokeData.playerHp || 0) / pokeData.playerHpMax));
         }
         if (team[sl].buffs) {
-          for (const st of PIKE_TRAP_STATUSES) {
+          for (const st of PIKE_PYRAMID_STATUSES) {
             if (team[sl].buffs[st] > 0) { status = st; break; }
           }
         }
       } else if (run.pikeTeam && run.pikeTeam[sl]) {
         const ps = run.pikeTeam[sl];
         if (typeof ps.hpRatio === "number") ratio = ps.hpRatio;
-        if (ps.status) status = normalizePikeStatus(ps.status);
+        if (ps.status) status = normalizePikePyramidStatus(ps.status);
       }
 
       const pct = Math.round(ratio * 100);
@@ -9406,7 +9409,7 @@
     // before DOM writes) so calling it here aligns the team-menu view
     // with whatever values the combat engine has right now.
     if (facility && isPikeFacility(facility)) {
-      migratePikeTeam();
+      migratePikePyramidTeam();
       try { refreshFrontierPikePills(); } catch (e) { /* ignore */ }
     } else {
       // Non-Pike lock (strict mode for other facilities) — strip any
@@ -9588,9 +9591,9 @@
   // game reset HP/buffs to their defaults, then re-apply our Pike state
   // at the tail of the same call. Every post-orig write overrides the
   // freshly-maxed value — perfect timing.
-  function installPikeHpRestoreHook() {
+  function installPikePyramidHpRestoreHook() {
     if (typeof window.initialiseArea !== "function") {
-      setTimeout(installPikeHpRestoreHook, 200);
+      setTimeout(installPikePyramidHpRestoreHook, 200);
       return;
     }
     if (window.__frontierExtPikeHpHooked) return;
@@ -9598,7 +9601,7 @@
     const orig = window.initialiseArea;
     window.initialiseArea = function () {
       const res = orig.apply(this, arguments);
-      try { applyPikeHpStateNow(); }
+      try { applyPikePyramidHpState(); }
       catch (e) { console.error("[frontier-ext] pike post-init apply failed:", e); }
       // Decorate the freshly-built combat sidebar slots (#explore-slotN-
       // member). setPkmnTeam just ran inside initialiseArea and rebuilt
@@ -9617,7 +9620,7 @@
   // (teams.js:544+).
   // Status source: `team[sl].buffs.<name>` as a turn counter
   // (explore.js:2566 etc.).
-  function snapshotPikeHpFromRuntime() {
+  function snapshotPikePyramidHp() {
     try {
       const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
       if (!run) return;
@@ -9625,7 +9628,7 @@
       // Snapshot HP/status for ANY facility that opts into persistHpStatus.
       if (!hasRunTeamState(fac)) return;
       if (typeof team === "undefined" || typeof pkmn === "undefined") return;
-      migratePikeTeam();
+      migratePikePyramidTeam();
       if (!run.pikeTeam) return;
       const debug = !!window.__frontierExt?.pikeDebug;
 
@@ -9642,7 +9645,7 @@
         let activeStatus = null;
         const buffs = team[sl].buffs;
         if (buffs) {
-          for (const st of PIKE_TRAP_STATUSES) {
+          for (const st of PIKE_PYRAMID_STATUSES) {
             if (buffs[st] > 0) { activeStatus = st; break; }
           }
         }
@@ -10454,7 +10457,7 @@
       // the real values; the post-orig branch then does the higher-level
       // victory/defeat routing.
       if (wasFrontierRun && wasVictory) {
-        try { snapshotPikeHpFromRuntime(); }
+        try { snapshotPikePyramidHp(); }
         catch (e) { console.error("[frontier-ext] pike snapshot failed:", e); }
       }
       const res = orig.apply(this, arguments);
@@ -10784,7 +10787,7 @@
     installArenaSwitchBlock();
     installTeamSanitizerHooks();
     installDomeTeamFilter();
-    installPikeHpRestoreHook();
+    installPikePyramidHpRestoreHook();
     installPyramidEquipSync();
     installPyramidStatusStickHook();
     installRunLockTooltipHook();
@@ -10963,12 +10966,12 @@
     applyPikeHealRatio,
     applyPikeTrap,
     pikeAdvanceAfterEvent,
-    snapshotPikeHpFromRuntime,
-    applyPikeHpStateNow,
-    initPikeTeamFromPreview,
+    snapshotPikePyramidHp,
+    applyPikePyramidHpState,
+    initPikePyramidTeamFromPreview,
     migratePikeState,
-    migratePikeTeam,
-    normalizePikeStatus,
+    migratePikePyramidTeam,
+    normalizePikePyramidStatus,
     // Round-cleared modal (universal across facilities)
     showRoundClearedModal,
     // Team-menu lock
@@ -10981,8 +10984,8 @@
     pikeDebug: false,
     PIKE_ROOM_COUNT,
     PIKE_DOOR_COUNT,
-    PIKE_TRAP_STATUSES,
-    PIKE_STATUS_TURNS,
+    PIKE_PYRAMID_STATUSES,
+    PIKE_PYRAMID_STATUS_TURNS,
     CURTAIN_SVG,
     difficultyMultiplier,
     getBossRoundInfo,
