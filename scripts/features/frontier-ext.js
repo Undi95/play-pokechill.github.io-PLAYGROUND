@@ -7293,6 +7293,11 @@
     const canLearn = (mvKey) => {
       const def = move[mvKey];
       if (!def || !Array.isArray(def.moveset)) return false;
+      // Pokechill uses "all" as a universal-learn marker. Without this
+      // gate, Butterfree / Skarmory / other non-poison Pokémon on the
+      // Poison theme couldn't roll Toxic (moveset: ["poison", "all"])
+      // and the bias silently failed — no status move got injected.
+      if (def.moveset.includes("all")) return true;
       return types.some((t) => def.moveset.includes(t));
     };
     const preferred = themeKey && PYRAMID_THEME_PREFERRED_STATUS_MOVES[themeKey];
