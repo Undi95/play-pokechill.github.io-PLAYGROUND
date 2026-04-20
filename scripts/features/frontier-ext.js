@@ -4566,12 +4566,16 @@
       // subtract 6.25 HP per frame), so round at display time — the
       // judge card should read "120 HP" not "119.875 HP".
       const hp = (v) => Math.round(v || 0) + " HP";
+      // Mind is computed as a ratio (attacks ÷ total moves) — displaying
+      // raw attack counts hid that a setup-heavy opponent could lose
+      // Mind even with more attacks. Show "X/Y" so the ratio is visible.
+      const mindCell = (att, mv) => `${att}/${mv || 0}`;
       const host = document.createElement("div");
       host.className = "frontier-ext-arena-verdict " + (playerWins ? "win" : "lose");
       host.innerHTML = `
         <div class="title">${l.title}</div>
         <div class="rows">
-          ${row(l.mind, scores.mindPlayerWins, scores.playerAttacks, scores.enemyAttacks)}
+          ${row(l.mind, scores.mindPlayerWins, mindCell(scores.playerAttacks, scores.playerMoves), mindCell(scores.enemyAttacks, scores.enemyMoves))}
           ${row(l.skill, scores.skillPlayerWins, hp(scores.playerDamage), hp(scores.enemyDamage))}
           ${row(l.body, scores.bodyPlayerWins, pct(hpRatios.playerRatio), pct(hpRatios.enemyRatio))}
         </div>
