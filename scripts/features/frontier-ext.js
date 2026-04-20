@@ -10881,6 +10881,11 @@
           if (facP && isFactoryFacility(facP)) {
             try { cleanupFactoryRun(run); } catch (e) { /* ignore */ }
           }
+          // Pyramid-mirrored held items would otherwise outlive the
+          // forfeit and stay glued to the user's preview team forever.
+          if (facP && isPyramidFacility(facP)) {
+            try { cleanupPyramidPreviewItems(run); } catch (e) { /* ignore */ }
+          }
           try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
           return true;
         }
@@ -10894,6 +10899,9 @@
         const fac = FACILITIES.find((f) => f.id === run.facilityId);
         if (fac && isFactoryFacility(fac)) {
           try { cleanupFactoryRun(run); } catch (e) { /* ignore */ }
+        }
+        if (fac && isPyramidFacility(fac)) {
+          try { cleanupPyramidPreviewItems(run); } catch (e) { /* ignore */ }
         }
         try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
         return true;
