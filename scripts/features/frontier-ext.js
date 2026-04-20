@@ -2180,37 +2180,13 @@
         max-height: 80vh;
         overflow-y: auto;
       }
-      /* EXCEPTIONAL for this modal only: reposition the vanilla close
-         button to top-right and shrink it. The default close sits at
-         mid-center which overlaps the Confirm / Abandon action row.
-         Uses :has() for modern browsers AND a direct class selector on
-         #tooltipBackground for older browser compat. */
+      /* Factory modals (rental selection + post-combat swap) hide the
+         × entirely. With the Rest/Resume system in place there's no
+         need for an escape hatch — the only valid exits are the
+         in-modal actions (Confirmer / Passer / Abandonner). */
       #tooltipBackground.frontier-ext-factory-open #tooltipClose,
       #tooltipBackground:has(#tooltipBox.frontier-ext-factory-open) #tooltipClose {
-        position: absolute !important;
-        top: 0.6rem !important;
-        right: 0.6rem !important;
-        bottom: auto !important;
-        left: auto !important;
-        transform: none !important;
-        width: 1.8rem !important;
-        height: 1.8rem !important;
-        min-width: 0 !important;
-        min-height: 0 !important;
-        font-size: 0.95rem !important;
-        line-height: 1.8rem !important;
-        padding: 0 !important;
-        border-radius: 50% !important;
-        background: rgba(0, 0, 0, 0.6) !important;
-        color: #f5e6c8 !important;
-        border: 1px solid rgba(255, 230, 180, 0.3) !important;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5) !important;
-        z-index: 10 !important;
-      }
-      #tooltipBackground.frontier-ext-factory-open #tooltipClose:hover,
-      #tooltipBackground:has(#tooltipBox.frontier-ext-factory-open) #tooltipClose:hover {
-        background: rgba(192, 57, 43, 0.85) !important;
-        border-color: rgba(255, 180, 180, 0.5) !important;
+        display: none !important;
       }
       /* Active-run lock: when the facility preview or combat-launch
          modal is open with an ACTIVE (locked) run, the only valid exits
