@@ -3486,7 +3486,7 @@
         if (saved.currentArea !== RUN_AREA_ID) return res;
         if (typeof team === "undefined") return res;
 
-        // Filter + PACK the team (anti-cheese). Two things to solve:
+        // Filter + PACK the team (anti-cheese). Three things to solve:
         //   1. Anti-cheese: if the player reordered the team or switched
         //      preview teams between pick and launch, keep only the
         //      exact mons they picked (matched by Pokémon ID).
@@ -3494,16 +3494,24 @@
         //      game hardcodes `exploreActiveMember = "slot1"` in
         //      initialiseArea. Leaving slot1 empty would crash
         //      updateTeamPkmn at team[slot1].pkmn.id lookup.
-        const keep = new Set(run.domeSelection);
-        const kept = [];
+        //   3. SEND ORDER: canonical Dome rule — the Pokémon are sent
+        //      in the order the player picked them (not preview-slot
+        //      order). Iterate run.domeSelection (push-in-click-order,
+        //      see the toggle at line ~3417) and resolve each id to
+        //      its source slot. This makes the first pick = slot1 =
+        //      first Pokémon on the field.
+        const slotById = {};
         for (const slotKey of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
           const slot = team[slotKey];
           if (!slot) continue;
           const mon = slot.pkmn;
           const monId = mon && (mon.id || (typeof mon === "string" ? mon : null));
-          if (monId && keep.has(monId)) {
-            kept.push({ pkmn: slot.pkmn, item: slot.item });
-          }
+          if (monId && !slotById[monId]) slotById[monId] = slot;
+        }
+        const kept = [];
+        for (const pickedId of run.domeSelection) {
+          const slot = slotById[pickedId];
+          if (slot) kept.push({ pkmn: slot.pkmn, item: slot.item });
         }
         const SLOTS = ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"];
         for (let i = 0; i < SLOTS.length; i++) {
