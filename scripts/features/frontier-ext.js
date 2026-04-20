@@ -7352,10 +7352,21 @@
       mid.querySelectorAll("[data-pyr-drop]").forEach((btn) => {
         btn.onclick = () => {
           const dropId = btn.dataset.pyrDrop;
-          // Remove every unit of the chosen id, insert the new one.
-          run.combatBag.items = run.combatBag.items.filter((it) => it.id !== dropId);
-          pyramidAddToBag(run, newItemId);
-          pyramidAfterEvent(facility);
+          // Drop ONE unit per click. If the entry hits 0, it's removed
+          // and a distinct-id slot is freed, so the new item fits; if
+          // the entry still has units left, the bag is still full and
+          // the picker re-opens so the player can drop something else
+          // (or abandon the find via "Jeter le nouvel objet").
+          const entry = run.combatBag.items.find((it) => it.id === dropId);
+          if (entry) {
+            entry.count = (entry.count || 1) - 1;
+            if (entry.count <= 0) {
+              run.combatBag.items = run.combatBag.items.filter((it) => it !== entry);
+            }
+          }
+          const added = pyramidAddToBag(run, newItemId);
+          if (added) pyramidAfterEvent(facility);
+          else showPyramidBagFullPicker(facility, newItemId);
         };
       });
     }
