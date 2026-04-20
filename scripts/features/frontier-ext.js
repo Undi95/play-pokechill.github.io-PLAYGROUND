@@ -8132,6 +8132,44 @@
     };
   }
 
+  // Scale enemy max HP by the current diff's IV rating, mirroring the
+  // player-side formula `(base) * Math.pow(1.1, healthIvs)`. Vanilla
+  // setWildPkmn computes wildPkmnHp using only pkmn[id].bst.hp + level
+  // + area.difficulty — no IV term — so a round-20 enemy with diff.
+  // ivRating=6 had the same HP pool as a round-1 enemy with ivRating=0.
+  // Now the HP pool grows 1.1^ivRating (max 1.77× at iv 6), matching
+  // how the player's own IVs scale their own HP.
+  function installEnemyIvHpHook() {
+    if (typeof window.setWildPkmn !== "function") {
+      setTimeout(installEnemyIvHpHook, 150);
+      return;
+    }
+    if (window.__frontierExtEnemyIvHpHooked) return;
+    window.__frontierExtEnemyIvHpHooked = true;
+    const orig = window.setWildPkmn;
+    const globalEval = eval;
+    window.setWildPkmn = function () {
+      const res = orig.apply(this, arguments);
+      try {
+        // Only scale inside a Frontier run — leave vanilla wild areas
+        // untouched.
+        if (typeof saved !== "object" || !saved) return res;
+        if (saved.currentArea !== RUN_AREA_ID) return res;
+        const run = saved.frontierExt && saved.frontierExt.activeRun;
+        if (!run) return res;
+        const facility = FACILITIES.find((f) => f.id === run.facilityId);
+        if (!facility) return res;
+        const diff = computeRunDifficulty(run.round + 1, facility);
+        const mult = Math.pow(1.1, Math.max(0, Math.min(6, diff.ivRating | 0)));
+        if (mult === 1) return res;
+        globalEval("wildPkmnHp = wildPkmnHp * " + mult);
+        globalEval("wildPkmnHpMax = wildPkmnHpMax * " + mult);
+        if (typeof updateWildPkmn === "function") updateWildPkmn();
+      } catch (e) { console.error("[frontier-ext] enemy IV HP scale failed:", e); }
+      return res;
+    };
+  }
+
   function installCombatHook() {
     if (typeof window.leaveCombat !== "function") {
       setTimeout(installCombatHook, 200);
@@ -8472,6 +8510,7 @@
     installFactoryRestrictedBypass();
     installHelpTooltip();
     installCombatHook();
+    installEnemyIvHpHook();
     installExitPkmnTeamBlock();
     installExitRedirect();
     installVSLeakFilter();
