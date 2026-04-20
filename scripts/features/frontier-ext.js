@@ -4515,6 +4515,10 @@
       // Team stays unlocked now that the challenge is over. removeLock
       // is a no-op if the lock wasn't applied (paused-run abandon).
       try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
+      // Force-flush to localStorage so F5 / tab-close immediately after
+      // abandoning can't revert the decision via the 60s auto-save
+      // window — mirrors the Rest action's eager save.
+      try { if (typeof saveGame === "function") saveGame(); } catch (e) { /* ignore */ }
       refreshActiveFrontierView();
       if (typeof closeTooltip === "function") closeTooltip();
       return;
@@ -5499,6 +5503,56 @@
         }
       } catch (e) { /* fall through */ }
       return orig.apply(this, arguments);
+    };
+  }
+
+  // Universal × lock: any time openTooltip fires while an active run
+  // is in progress, add the run-lock class so the vanilla close button
+  // is hidden. The player is forced to commit via the in-modal buttons
+  // (Continue / Rest / Abandon, or the modal's own flow controls) —
+  // matches the Battle Frontier pattern where you can't accidentally
+  // "cancel out" of the challenge screen.
+  //
+  // Mirror cleanup on closeTooltip so modals outside a run aren't
+  // silently stripping the × (no reason to affect non-frontier tips).
+  function installRunLockTooltipHook() {
+    if (typeof window.openTooltip !== "function"
+     || typeof window.closeTooltip !== "function") {
+      setTimeout(installRunLockTooltipHook, 200);
+      return;
+    }
+    if (window.__frontierExtRunLockHooked) return;
+    window.__frontierExtRunLockHooked = true;
+    const origOpen = window.openTooltip;
+    const origClose = window.closeTooltip;
+    const lockClass = "frontier-ext-run-lock-open";
+    const apply = () => {
+      try {
+        const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
+        const bg = document.getElementById("tooltipBackground");
+        const box = document.getElementById("tooltipBox");
+        if (run) {
+          if (bg)  bg.classList.add(lockClass);
+          if (box) box.classList.add(lockClass);
+        } else {
+          if (bg)  bg.classList.remove(lockClass);
+          if (box) box.classList.remove(lockClass);
+        }
+      } catch (e) { /* ignore */ }
+    };
+    window.openTooltip = function () {
+      const res = origOpen.apply(this, arguments);
+      apply();
+      return res;
+    };
+    window.closeTooltip = function () {
+      try {
+        const bg = document.getElementById("tooltipBackground");
+        const box = document.getElementById("tooltipBox");
+        if (bg)  bg.classList.remove(lockClass);
+        if (box) box.classList.remove(lockClass);
+      } catch (e) { /* ignore */ }
+      return origClose.apply(this, arguments);
     };
   }
 
@@ -7141,18 +7195,23 @@
   // in Pokechill's moveDictionary. Ordered by general nastiness; the
   // bias fn picks one the species can actually learn, falling back to
   // the first movepool-compatible option.
+  // Status moves the bias can inject. Kept to moves with BROAD canonical
+  // distribution (type-learn makes sense thematically) and capped at
+  // moderate power/accuracy — no 100%-sleep ordeals. Spore (Parasect-
+  // exclusive in canon) and lovelyKiss (Jynx-exclusive) used to be in
+  // this list; they were pulled because Pokechill's type-based moveset
+  // model lets every grass/normal mon inherit them, which produced
+  // Rafflesia-with-Spore and similar oddities. StunSpore / sleepPowder
+  // are the expected grass-type options.
   const PYRAMID_WILD_STATUS_MOVES = [
-    "spore",        // sleep — hardest-hitting but rare
-    "lovelyKiss",   // sleep — Jynx-line
-    "willOWisp",    // burn
-    "thunderWave",  // paralysis
+    "willOWisp",    // burn (fire / ghost)
+    "thunderWave",  // paralysis (electric / psychic / ghost / fairy)
     "stunSpore",    // paralysis (grass)
-    "toxic",        // bad poison
-    "poisonPowder", // plain poison
+    "toxic",        // bad poison (broad)
+    "poisonPowder", // plain poison (grass)
     "confuseRay",   // confusion (ghost)
-    "swagger",      // attack boost + confusion
-    "iceBeam",      // freeze chance (damage move)
-    "glare",        // paralysis (serpent)
+    "swagger",      // attack boost + confusion (broad)
+    "glare",        // paralysis (snake-like)
   ];
 
   // Inject a status move into slot1 of a wild's moveset IF the species
@@ -10568,6 +10627,7 @@
     installPikeHpRestoreHook();
     installPyramidEquipSync();
     installPyramidStatusStickHook();
+    installRunLockTooltipHook();
     installTeamMenuLockHook();
     installTeamMenuObserver();
     installTeamLockEventFilter();
