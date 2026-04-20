@@ -8217,9 +8217,19 @@
   // rest, etc.) — routes to the Hoenn tab if the active run is in one
   // of our facilities, otherwise falls back to the vanilla frontier tab.
   function refreshActiveFrontierView() {
-    const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
-    const isHoennRun = run && FACILITIES.some((f) => f.id === run.facilityId);
-    if (isHoennRun && typeof window.updateHoennBF === "function") {
+    const fe = saved && saved.frontierExt;
+    const activeRun = fe && fe.activeRun;
+    const pausedIds = fe && fe.pausedRuns ? Object.keys(fe.pausedRuns) : [];
+    const isHoennActive = activeRun && FACILITIES.some((f) => f.id === activeRun.facilityId);
+    const hasHoennPaused = pausedIds.some((id) => FACILITIES.some((f) => f.id === id));
+    // Also keep the player on the Hoenn tab if that's where they
+    // currently are — otherwise a Rest action (which clears activeRun)
+    // would kick them back to vanilla Battle Frontier tab, so the new
+    // EN PAUSE badge on the same tile they just interacted with is
+    // never visible. Checks computed display on our listing div.
+    const hoennListing = document.getElementById(HOENN_LISTING_ID);
+    const onHoennTab = !!(hoennListing && getComputedStyle(hoennListing).display !== "none");
+    if ((isHoennActive || hasHoennPaused || onHoennTab) && typeof window.updateHoennBF === "function") {
       window.updateHoennBF();
     } else if (typeof updateFrontier === "function") {
       updateFrontier();
