@@ -7807,27 +7807,20 @@
   // Assign the held `itemId` to pikeTeam[slotKey].item.
   //   • If the item was already worn on another slot, MOVE it (single
   //     copy, single active slot).
-  //   • If the target slot already held a DIFFERENT item, that old
-  //     item is REMOVED from the bag entirely — canonical "remplacer
-  //     = jeter". Discarded, not returned.
+  //   • Target slot's previous item (if any) is simply unequipped —
+  //     held items always live in the bag, so nothing is discarded
+  //     and nothing is refunded. The only time a held item leaves
+  //     the bag is the bag-full drop picker (player-driven choice).
   //   • Equipping doesn't consume the bag entry for the new item
   //     itself (held = owned, bag always shows it).
   // Always succeeds. Returns true.
   function pyramidEquipToSlot(run, slotKey, itemId) {
     if (!run || !run.pikeTeam || !run.pikeTeam[slotKey]) return false;
-    const ps = run.pikeTeam[slotKey];
-    const prevItem = ps.item || null;
-    // If the item is already equipped on a different slot, clear it.
     const previouslyOn = pyramidEquippedSlot(run, itemId);
     if (previouslyOn && previouslyOn !== slotKey) {
       run.pikeTeam[previouslyOn].item = null;
     }
-    // Replacing a different held item: remove the old one from the bag.
-    if (prevItem && prevItem !== itemId) {
-      const bag = pyramidEnsureBag(run);
-      bag.items = bag.items.filter((it) => it.id !== prevItem);
-    }
-    ps.item = itemId;
+    run.pikeTeam[slotKey].item = itemId;
     return true;
   }
 
