@@ -4637,7 +4637,12 @@
     const hpSnapshot = {};
     try {
       if (typeof team !== "undefined" && typeof pkmn !== "undefined") {
-        for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
+        // Frontier teams only ever use slot1-3 (Gen 3 Emerald rule,
+        // enforced via expectedTeamSize). Iterating slot4-6 would pull
+        // leftover data from the player's non-Frontier team state —
+        // harmless for the snapshot itself but incorrect semantically
+        // and would leak restores onto mons that aren't even playing.
+        for (const sl of ["slot1", "slot2", "slot3"]) {
           if (!team[sl] || !team[sl].pkmn || !team[sl].pkmn.id) continue;
           const p = pkmn[team[sl].pkmn.id];
           if (p && typeof p.playerHp === "number") hpSnapshot[sl] = p.playerHp;
@@ -4684,7 +4689,7 @@
           //   • slots whose HP was already 0 in the snapshot (already
           //     dead before verdict — leave dead)
           if (typeof team !== "undefined" && typeof pkmn !== "undefined") {
-            for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
+            for (const sl of ["slot1", "slot2", "slot3"]) {
               if (!team[sl] || !team[sl].pkmn || !team[sl].pkmn.id) continue;
               const speciesId = team[sl].pkmn.id;
               if (killedSpeciesId && speciesId === killedSpeciesId) continue;
