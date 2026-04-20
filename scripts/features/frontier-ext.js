@@ -4562,13 +4562,17 @@
           <span class="${pWon ? "lose" : "win"}">${l.them} ${eVal}</span>
         </div>`;
       const pct = (r) => Math.round(r * 100) + "%";
+      // HP damage tallies accumulate floats (e.g. residual-damage ticks
+      // subtract 6.25 HP per frame), so round at display time — the
+      // judge card should read "120 HP" not "119.875 HP".
+      const hp = (v) => Math.round(v || 0) + " HP";
       const host = document.createElement("div");
       host.className = "frontier-ext-arena-verdict " + (playerWins ? "win" : "lose");
       host.innerHTML = `
         <div class="title">${l.title}</div>
         <div class="rows">
           ${row(l.mind, scores.mindPlayerWins, scores.playerAttacks, scores.enemyAttacks)}
-          ${row(l.skill, scores.skillPlayerWins, scores.playerDamage + " HP", scores.enemyDamage + " HP")}
+          ${row(l.skill, scores.skillPlayerWins, hp(scores.playerDamage), hp(scores.enemyDamage))}
           ${row(l.body, scores.bodyPlayerWins, pct(hpRatios.playerRatio), pct(hpRatios.enemyRatio))}
         </div>
       `;
@@ -4612,6 +4616,22 @@
       bodyPlayerWins, skillPlayerWins, mindPlayerWins,
     }, hp);
 
+    // Snapshot the active slot + species NOW, before the 3s pause. If
+    // the mon dies to status tick / residual damage during the pause
+    // and the engine auto-switches to the next bench slot, we must
+    // NOT KO that new slot — the judge only rules on the mon who was
+    // on-field at verdict time. Reading arenaReadActiveSlots inside
+    // the setTimeout was the source of "jury kills 2 mons" reports
+    // when the first one happened to die mid-pause.
+    const snapshotActive = arenaReadActiveSlots();
+    const snapshotPlayerPkmnId =
+      snapshotActive.playerSlot
+        && typeof team !== "undefined"
+        && team[snapshotActive.playerSlot]
+        && team[snapshotActive.playerSlot].pkmn
+        ? team[snapshotActive.playerSlot].pkmn.id
+        : null;
+
     // Freeze combat ticks during the pause, then deliver the KO + reset.
     const globalEval = eval;
     setTimeout(() => {
@@ -4622,11 +4642,21 @@
           globalEval("wildPkmnHp = 0");
           if (typeof updateWildPkmn === "function") updateWildPkmn();
         } else {
-          // Player's CURRENT active only — not the bench.
-          const { playerSlot } = arenaReadActiveSlots();
-          if (playerSlot && typeof team !== "undefined" && team[playerSlot]
-              && team[playerSlot].pkmn && typeof pkmn !== "undefined") {
-            pkmn[team[playerSlot].pkmn.id].playerHp = 0;
+          // Player's mon who was on-field AT VERDICT — ONLY if they're
+          // still on-field (didn't swap out during the pause) AND they're
+          // still alive (didn't already faint to residual damage).
+          // Skipping the KO write in either case preserves the bench.
+          if (snapshotPlayerPkmnId && typeof pkmn !== "undefined") {
+            const snapSpec = pkmn[snapshotPlayerPkmnId];
+            const { playerSlot: nowSlot } = arenaReadActiveSlots();
+            const stillOnField = nowSlot === snapshotActive.playerSlot
+              && team[nowSlot]
+              && team[nowSlot].pkmn
+              && team[nowSlot].pkmn.id === snapshotPlayerPkmnId;
+            const stillAlive = snapSpec && (snapSpec.playerHp || 0) > 0;
+            if (stillOnField && stillAlive) {
+              snapSpec.playerHp = 0;
+            }
           }
           if (typeof updateTeamPkmn === "function") updateTeamPkmn();
         }
