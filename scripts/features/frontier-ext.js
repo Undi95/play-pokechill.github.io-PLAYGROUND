@@ -4602,7 +4602,19 @@
     const hp = arenaReadHpRatios();
     const bodyPlayerWins  = hp.playerRatio  > hp.enemyRatio;
     const skillPlayerWins = state.playerDamage  > state.enemyDamage;
-    const mindPlayerWins  = state.playerAttacks > state.enemyAttacks;
+    // Mind = "eagerness to attack" (canonical Emerald rule). Originally
+    // implemented as raw attack count, which a speed-stacking mon
+    // (Pachirisu + Costar + No Retreat → Speed +3) trivially dominated:
+    // 6-8 player attacks vs 3 enemy attacks meant Mind was a free win
+    // every matchup, and with Body or Skill the verdict locked at 2/3.
+    // Switching to an attack RATIO (attacks ÷ total moves) neutralises
+    // raw speed — both sides get ARENA_TURNS_PER_SIDE actions before
+    // the judge fires, so the question is "of those 3 actions, how many
+    // were offensive vs setup/status?". A setup-heavy mon now loses
+    // Mind even if they were faster.
+    const playerMindRatio = state.playerMoves > 0 ? state.playerAttacks / state.playerMoves : 0;
+    const enemyMindRatio  = state.enemyMoves  > 0 ? state.enemyAttacks  / state.enemyMoves  : 0;
+    const mindPlayerWins  = playerMindRatio > enemyMindRatio;
 
     let playerScore = 0;
     if (bodyPlayerWins)  playerScore++;
