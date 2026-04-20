@@ -485,10 +485,10 @@
   // facility — matches the canonical Gen 3 "set" structure. Each facility
   // def declares its own value explicitly so the boss placement + streak
   // counter use precise Bulbapedia numbers, no guessing:
-  //   • Tour / Palais / Arène / Usine : 7 combats / round
-  //   • Dôme                           : 3 combats (bracket QF+SF+Final)
-  //   • Pic                            : 14 salles / round (roomsPerRound)
-  //   • Pyramide                       : 7 étages / round (floorsPerRound)
+  //   • Tower / Palace / Arena / Factory : 7 battles per round
+  //   • Dome                              : 3 battles (bracket QF+SF+Final)
+  //   • Pike                              : 14 rooms per round (roomsPerRound)
+  //   • Pyramid                           : 7 floors per round (floorsPerRound)
   //
   // The function prefers `battlesPerRound`, then falls back to the
   // specialised fields (roomsPerRound / floorsPerRound) for legacy defs
@@ -2895,7 +2895,7 @@
     const t = lang === "fr"
       ? {
           title: "⚔️ Zone de Combat — Hoenn",
-          sub: "Règles Gen 3 d'Emeraude · Pokémon niveau 100 requis · Équipes de 3 · Pas de restriction de division",
+          sub: "Règles Gen 3 d'Émeraude · Pokémon niveau 100 requis · Équipes de 3 · Pas de restriction de division",
         }
       : {
           title: "⚔️ Battle Frontier — Hoenn",
