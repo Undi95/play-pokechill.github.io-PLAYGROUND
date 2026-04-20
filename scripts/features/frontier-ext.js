@@ -4060,6 +4060,12 @@
         saved.frontierExt.pausedRuns[run.facilityId] = run;
         saved.frontierExt.activeRun = null;
         try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
+        // Force-flush to localStorage NOW so an F5 / tab-close before
+        // the next periodic save interval (60s) can't revert the pause.
+        // Calls the vanilla saveGame directly — doesn't add anything to
+        // the save payload shape, just triggers the existing serialiser
+        // earlier than its timer would.
+        try { if (typeof saveGame === "function") saveGame(); } catch (e) { /* ignore */ }
       }
       if (typeof closeTooltip === "function") closeTooltip();
       refreshActiveFrontierView();
