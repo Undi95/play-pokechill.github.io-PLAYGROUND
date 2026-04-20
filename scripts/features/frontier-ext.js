@@ -5,11 +5,11 @@
 // Adds 7 "(Hoenn)" facilities to the existing Battle Frontier menu — each
 // labelled with the Hoenn region where the Gen 3 Battle Frontier lived:
 //   • Tour de Combat (Hoenn)       — trainer gauntlet, brain Anabel
-//   • Palais de Combat (Hoenn)     — auto-move by nature, brain Spenser
+//   • Palace de Combat (Hoenn)     — auto-move by nature, brain Spenser
 //   • Arène de Combat (Hoenn)      — 3-turn judge system, brain Greta
 //   • Dôme de Combat (Hoenn)       — single-elim bracket, brain Tucker
 //   • Usine de Combat (Hoenn)      — random rentals + swap, brain Noland
-//   • Pic de Combat (Hoenn)        — 3-door choose-your-fate, brain Lucy
+//   • Reptile de Combat (Hoenn)    — 3-door choose-your-fate, brain Lucy
 //   • Pyramide de Combat (Hoenn)   — dungeon grid, brain Brandon
 //
 // Canonical Gen 3 rules:
@@ -93,14 +93,14 @@
     {
       id: "frontierPalaceSecret",
       nameEn: "Battle Palace (Hoenn)",
-      nameFr: "Palais de Combat (Hoenn)",
+      nameFr: "Palace de Combat (Hoenn)",
       descEn: "Your Pokémon pick moves on their own, guided by their nature. No player input during attacks.",
       descFr: "Tes Pokémon choisissent leurs capacités seuls selon leur nature. Aucun contrôle pendant les attaques.",
       brain: {
         id: "spenser",
         sprite: "palace_maven_spenser",
         nameEn: "Palace Maven Spenser",
-        nameFr: "Maître du Palais Santo",
+        nameFr: "Maître du Palace Santo",
         teamSilver: ["crobat", "lapras", "claydol"],
         teamGold: ["crobat", "lapras", "slaking"],
       },
@@ -187,14 +187,14 @@
     {
       id: "frontierPikeSecret",
       nameEn: "Battle Pike (Hoenn)",
-      nameFr: "Pic de Combat (Hoenn)",
+      nameFr: "Reptile de Combat (Hoenn)",
       descEn: "14 rooms. Pick one of three doors per room: battle, wild, heal, trap, or mystery. HP and status persist.",
       descFr: "14 salles. Choisis une des trois portes à chaque salle : combat, sauvage, soin, piège ou mystère. PV et statuts persistent.",
       brain: {
         id: "lucy",
         sprite: "pike_queen_lucy",
         nameEn: "Pike Queen Lucy",
-        nameFr: "Reine du Pic Lucie",
+        nameFr: "Reine du Reptile Lucie",
         teamSilver: ["seviper", "shuckle", "milotic"],
         teamGold: ["seviper", "gyarados", "milotic"],
       },
@@ -2376,7 +2376,7 @@
         filter: grayscale(0.5);
         transform: none;
       }
-      /* ── Pic de Combat (Battle Pike) ─────────────────────────────────────
+      /* ── Reptile de Combat (Battle Pike) ─────────────────────────────────
          Curtain-door picker, status/heal modals, room/HP banners. */
       .frontier-ext-pike-banner {
         display: flex;
@@ -7980,8 +7980,8 @@
   // Shown when a run is forced to end because the tied preview slot drifted
   // below 3 Pokémon AND the current preview slot isn't a valid fallback.
   // Replaces what used to be a silent activeRun=null assignment — players
-  // kept reporting streaks that "vanished" mid-run (e.g. Tour locked at 16,
-  // Palais at 11) without any message. Now they see the why.
+  // kept reporting streaks that "vanished" mid-run (e.g. Tower locked at 16,
+  // Palace at 11) without any message. Now they see the why.
   function showTiedTeamLostModal(facility) {
     const lang = window.gameLang === "fr" ? "fr" : "en";
     const title = lang === "fr" ? "Série interrompue" : "Run ended";
@@ -8372,10 +8372,10 @@
           // Post-combat auto-reopen. The ZdC flow should always land on a
           // clear "next step" modal — never dump the player on the
           // Frontier tab with no guidance. Branches, in priority order:
-          //   1. Round was just cleared (any facility) : celebration modal
-          //   2. Pic mid-round                         : 3-door picker
-          //   3. Dôme mid-bracket                      : bracket preview
-          //   4. Tour/Palais/Arène/Usine mid-round     : next-battle preview
+          //   1. Round was just cleared (any facility)   : celebration modal
+          //   2. Pike mid-round                          : 3-door picker
+          //   3. Dome mid-bracket                        : bracket preview
+          //   4. Tower/Palace/Arena/Factory mid-round    : next-battle preview
           // Re-check activeRun inside the deferred callback so an abandon
           // between now and the timeout firing doesn't resurrect anything.
           setTimeout(() => {
@@ -8391,7 +8391,7 @@
               return;
             }
 
-            // 2. Pic — auto-open the 3-curtain picker at the next room.
+            // 2. Pike — auto-open the 3-curtain picker at the next room.
             if (isPikeFacility(fac)
                 && laterRun.pikeRoom >= 1
                 && laterRun.pikeRoom <= PIKE_ROOM_COUNT) {
@@ -8399,7 +8399,7 @@
               return;
             }
 
-            // 2b. Pyramide — come back to the floor map after every
+            // 2b. Pyramid — come back to the floor map after every
             //     combat (dungeon tile-by-tile exploration). The active
             //     pyramid state is kept alive across combats.
             if (isPyramidFacility(fac) && laterRun.pyramid) {
@@ -8407,14 +8407,14 @@
               return;
             }
 
-            // 3. Dôme — auto-open the bracket preview on the next
+            // 3. Dome — auto-open the bracket preview on the next
             //    sub-battle of the same round.
             if (isDomeFacility(fac) && (laterRun.bracketBattle || 1) > 1) {
               openDomeBracketPreview(fac);
               return;
             }
 
-            // 4. Tour / Palais / Arène / Usine — auto-open the next-step
+            // 4. Tower / Palace / Arena / Factory — auto-open the next-step
             //    screen. Factory first shows the post-battle swap modal
             //    (when a swap is pending); other facilities go straight
             //    to the simulated-fight preview for the next battle.
