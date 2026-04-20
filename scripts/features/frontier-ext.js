@@ -2445,6 +2445,27 @@
       }
       .frontier-ext-pyr-kinesiste .lbl { opacity: 0.75; font-size: 0.88rem; }
       .frontier-ext-pyr-kinesiste .val { font-weight: bold; }
+      /* Pre-run Kinésiste line — sits in the facility preview above
+         the action buttons. Shown ONLY for the Pyramid at registration
+         / resume / round-cleared transitions, never mid-run. */
+      .frontier-ext-pyr-kinesiste-preview {
+        margin: 0.35rem 0.5rem;
+        padding: 0.35rem 0.55rem;
+        background: linear-gradient(180deg, rgba(80, 40, 120, 0.35), rgba(50, 20, 80, 0.5));
+        border-radius: 0.3rem;
+        text-align: center;
+        color: #f2d999;
+      }
+      .frontier-ext-pyr-kinesiste-preview .intro {
+        font-style: italic;
+        font-size: 0.85rem;
+        color: #e0b0ff;
+        margin-bottom: 0.2rem;
+      }
+      .frontier-ext-pyr-kinesiste-preview .theme {
+        font-size: 0.92rem;
+      }
+      .frontier-ext-pyr-kinesiste-preview .theme strong { color: #fff; }
       /* Combat Bag viewer. */
       .frontier-ext-pyr-bag {
         padding: 0.6rem;
@@ -3489,6 +3510,30 @@
         `;
       }
 
+      // Pyramid-only: Kinésiste row reveals the theme the player is
+      // about to face. Shown at registration (fresh facility), on
+      // resume (before re-entering), and on round-cleared transitions
+      // (covered by the Continue state) — NEVER mid-run inside the
+      // dungeon itself.
+      let kinesisteRowHtml = "";
+      if (isPyramidFacility(facility)) {
+        const themeForPreview = run
+          ? (run.roundJustCleared ? pyramidNextTheme(run) : pyramidCurrentTheme(run))
+          : PYRAMID_THEMES[0];
+        const themeLabelPreview = lang === "fr" ? themeForPreview.labelFr : themeForPreview.labelEn;
+        const introLine = lang === "fr"
+          ? "🔮 La Kinésiste murmure : « Je sens le prochain thème… »"
+          : "🔮 The Psychic whispers: \"I sense the next theme…\"";
+        const themeLine = lang === "fr"
+          ? `Prochain thème : <strong>${themeLabelPreview}</strong>`
+          : `Next theme: <strong>${themeLabelPreview}</strong>`;
+        kinesisteRowHtml = `
+          <div class="frontier-ext-pyr-kinesiste-preview">
+            <div class="intro">${introLine}</div>
+            <div class="theme">${themeLine}</div>
+          </div>`;
+      }
+
       bottom.innerHTML = `
         <div class="frontier-ext-help-rules" style="grid-template-columns:auto 1fr;">
           <span class="label">${t.brain}</span>
@@ -3496,6 +3541,7 @@
           <span class="label">${t.maxStreak}</span>
           <span class="value">${maxStreak}</span>
         </div>
+        ${kinesisteRowHtml}
         <div class="frontier-ext-run-actions">${buttons}</div>
       `;
 
@@ -4249,15 +4295,11 @@
       else pyramidAfterEvent(facility);
       return;
     }
-    if (action === "pyr-kinesiste-open") {
-      if (isPyramidFacility(facility)) showPyramidKinesisteDialog(facility);
-      return;
-    }
     if (action === "pyr-bag-open") {
       if (isPyramidFacility(facility)) showPyramidBagDialog(facility);
       return;
     }
-    if (action === "pyr-kinesiste-close" || action === "pyr-bag-close") {
+    if (action === "pyr-bag-close") {
       if (isPyramidFacility(facility)) openPyramidFloorMap(facility);
       return;
     }
@@ -6652,9 +6694,12 @@
     const hint = isBossFloor ? t.hintFinal : t.hintStart;
     const hintClass = isBossFloor ? "pyr-hint boss" : "pyr-hint";
 
-    // Theme header + Kinésiste / Combat Bag buttons. The Kinésiste
-    // reveals the next round's theme (and the current one for reference);
-    // the bag button opens a read-only inventory viewer.
+    // Theme header + Combat Bag button. The Kinésiste (next-theme
+    // oracle) is NOT available mid-run — the canon has her visible
+    // only at registration / between rounds, so we wire that into the
+    // facility preview modal instead (see openFacilityPreview for the
+    // Pyramid-specific augmentation). Mid-run the player sees only
+    // the CURRENT theme label for reference.
     const currentTheme = pyramidCurrentTheme(run);
     const themeLabel = lang === "fr" ? currentTheme.labelFr : currentTheme.labelEn;
     const themeHeaderTxt = lang === "fr"
@@ -6664,7 +6709,6 @@
     const bagBtnLabel = lang === "fr"
       ? `🎒 Sac (${pyramidBagCount(run)}/${run.combatBag.cap})`
       : `🎒 Bag (${pyramidBagCount(run)}/${run.combatBag.cap})`;
-    const kinesisteBtnLabel = lang === "fr" ? "🔮 Kinésiste — Thème ?" : "🔮 Psychic — Theme?";
 
     if (mid) {
       mid.style.display = "block";
@@ -6674,7 +6718,6 @@
         <div class="${hintClass}">${hint}</div>
         ${gridHtml}
         <div class="frontier-ext-pyr-side-actions">
-          <button class="frontier-ext-action-btn" data-action="pyr-kinesiste-open">${kinesisteBtnLabel}</button>
           <button class="frontier-ext-action-btn" data-action="pyr-bag-open">${bagBtnLabel}</button>
         </div>
         <div class="frontier-ext-run-actions">
@@ -6788,14 +6831,20 @@
       case PYR_TILES.WILD: {
         // Single wild Pokémon, species pulled from the CURRENT THEME's
         // pool (not the facility-wide pool). Theme rotates every series.
+        // Wild movesets are biased toward status moves — the Pyramid's
+        // core design pressure is "chip the player's HP/status over 7
+        // floors with no free heals", so wilds land a status hit as
+        // often as possible.
         state.grid[state.playerY][state.playerX] = PYR_TILES.EMPTY;
         const theme = pyramidCurrentTheme(run);
         const id = theme.pool[Math.floor(Math.random() * theme.pool.length)];
         const diff = computeRunDifficulty(run.round + 1, facility);
+        const moves = pickMovesetFor(id, diff);
+        biasPyramidWildMoveset(id, moves);
         const wildTrainer = {
           name: window.gameLang === "fr" ? "Pokémon sauvage" : "Wild Pokémon",
           sprite: "hiker",
-          team: [{ id, moves: pickMovesetFor(id, diff), nature: "" }],
+          team: [{ id, moves, nature: "" }],
           isWild: true,
           facilityId: facility.id,
           round: run.round + 1,
@@ -6909,6 +6958,44 @@
   function pyramidBagCount(run) {
     const bag = pyramidEnsureBag(run);
     return bag.items.reduce((n, it) => n + (it.count || 0), 0);
+  }
+
+  // Status moves the wild Pyramid Pokémon prefer — all verified present
+  // in Pokechill's moveDictionary. Ordered by general nastiness; the
+  // bias fn picks one the species can actually learn, falling back to
+  // the first movepool-compatible option.
+  const PYRAMID_WILD_STATUS_MOVES = [
+    "spore",        // sleep — hardest-hitting but rare
+    "lovelyKiss",   // sleep — Jynx-line
+    "willOWisp",    // burn
+    "thunderWave",  // paralysis
+    "stunSpore",    // paralysis (grass)
+    "toxic",        // bad poison
+    "poisonPowder", // plain poison
+    "confuseRay",   // confusion (ghost)
+    "swagger",      // attack boost + confusion
+    "iceBeam",      // freeze chance (damage move)
+    "glare",        // paralysis (serpent)
+  ];
+
+  // Inject a status move into slot1 of a wild's moveset IF the species
+  // can actually learn it. Reads the species movepool so we don't
+  // fabricate illegal moves that would fail to render.
+  function biasPyramidWildMoveset(speciesId, moveset) {
+    if (!Array.isArray(moveset) || !speciesId) return;
+    if (typeof pkmn === "undefined" || !pkmn[speciesId]) return;
+    const pool = pkmn[speciesId].movepool;
+    if (!Array.isArray(pool) || !pool.length) return;
+    // Find the first status-move candidate this species knows.
+    const poolSet = new Set(pool);
+    const candidates = PYRAMID_WILD_STATUS_MOVES.filter((mv) => poolSet.has(mv));
+    if (!candidates.length) return;
+    // Skip if the rolled moveset already carries one of them.
+    for (const mv of moveset) if (candidates.includes(mv)) return;
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    // Overwrite slot1 (highest-priority AI choice in Pokechill's pick
+    // order) so the wild opens with the annoyance.
+    moveset[0] = chosen;
   }
 
   // Canonical Pyramid: no held items allowed at registration. Clear the
