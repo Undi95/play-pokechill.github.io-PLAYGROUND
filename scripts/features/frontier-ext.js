@@ -4314,6 +4314,17 @@
     const run = saved.frontierExt.activeRun;
 
     if (action === "start") {
+      // Another facility already holds the active (locked) run: refuse.
+      // openFacilityPreview already surfaces this via
+      // showRunInProgressElsewhere, but handleRunAction is also reachable
+      // programmatically / from external callers / save-editor attacks —
+      // without this belt-and-braces guard a direct "start" call would
+      // overwrite activeRun and orphan the previous run's state.
+      const existing = saved.frontierExt.activeRun;
+      if (existing && existing.facilityId !== facility.id) {
+        showRunInProgressElsewhere(facility);
+        return;
+      }
       // Hard gate — every non-Factory facility needs exactly 3 Pokémon
       // in the current preview team BEFORE any run state is created.
       // Without this check, the run gets locked in, the player enters
@@ -9044,7 +9055,19 @@
     run.pikeHint = null;
 
     if (run.pikeRoom > PIKE_ROOM_COUNT) {
-      // Defensive: treat as round victory so the run stays consistent.
+      // Defensive: should never happen in normal play — room 14 ALWAYS
+      // rolls combat doors (brain / tough), and combat doors route
+      // through onRunVictory, not here. Reaching this branch means
+      // either:
+      //   • a save-tampered pikeRoom value, or
+      //   • a future regression in rollPikeDoors.
+      // In either case, granting silver/gold symbols (and by extension
+      // updating the streak) without a completed boss fight is a
+      // progression cheat. Heal/reset the team so the run stays
+      // consistent, but REFUSE to grant round credit / symbols /
+      // streak. The player has to legitimately clear room 14 to
+      // advance — closing the tooltip sends them back to the tile
+      // where they'll reopen the picker for a freshly-rolled room 1.
       run.pikeRoom = 1;
       if (run.pikeTeam) {
         for (const sl of ["slot1", "slot2", "slot3"]) {
@@ -9054,13 +9077,6 @@
           }
         }
       }
-      run.round += 1;
-      saved.frontierExt.streaks[run.facilityId] = run.round;
-      if (run.round > (saved.frontierExt.maxStreaks[run.facilityId] || 0)) {
-        saved.frontierExt.maxStreaks[run.facilityId] = run.round;
-      }
-      if (run.round === silverRoundFor(facility)) saved.frontierExt.symbols[run.facilityId].silver = true;
-      else if (run.round === goldRoundFor(facility)) saved.frontierExt.symbols[run.facilityId].gold = true;
       refreshActiveFrontierView();
       if (typeof closeTooltip === "function") closeTooltip();
       return;
