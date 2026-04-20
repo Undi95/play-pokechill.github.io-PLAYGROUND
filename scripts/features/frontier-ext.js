@@ -9902,9 +9902,17 @@
     // so Pike keeps the original behaviour unchanged.
     const perRound = battlesPerRound(facility);
     const battleInRound = run.battleInRound || 1;
+    // Pyramid boss combats are driven by the stairs-on-boss-floor tile,
+    // which sets run.pyramidEncounterKind = "brain" just before
+    // launchCombat fires. The floor counter isn't tied to battleInRound
+    // (battleInRound stays at 1 all 7 floors), so without this marker
+    // the brain branch is skipped and the boss ends up with a random
+    // generateTrainer roster instead of Bayar's canonical regis / birds.
     const brainDueThisBattle = bossInfo
       && !isDomeFacility(facility)
-      && (isPikeFacility(facility) || battleInRound === perRound);
+      && (isPikeFacility(facility)
+         || (isPyramidFacility(facility) && run.pyramidEncounterKind === "brain")
+         || battleInRound === perRound);
 
     // Regenerate (or keep) the upcoming trainer for this round
     let trainer;
