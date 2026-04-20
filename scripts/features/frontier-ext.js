@@ -8266,9 +8266,17 @@
       const res = orig.apply(this, arguments);
       try {
         // Only scale inside a Frontier run — leave vanilla wild areas
-        // untouched.
+        // untouched. The initial setWildPkmn of a combat fires BEFORE
+        // the engine swaps saved.currentArea from the overworld to
+        // RUN_AREA_ID, so a strict currentArea === RUN_AREA_ID check
+        // misses the first enemy load (and thus the judge read a
+        // vanilla-sized enemy HP pool). Accept EITHER currentArea OR
+        // currentAreaBuffer pointing at RUN_AREA_ID — the buffer is
+        // set in launchCombat well before the setWildPkmn call.
         if (typeof saved !== "object" || !saved) return res;
-        if (saved.currentArea !== RUN_AREA_ID) return res;
+        const inRunArea = saved.currentArea === RUN_AREA_ID
+                       || saved.currentAreaBuffer === RUN_AREA_ID;
+        if (!inRunArea) return res;
         const run = saved.frontierExt && saved.frontierExt.activeRun;
         if (!run) return res;
         const facility = FACILITIES.find((f) => f.id === run.facilityId);
