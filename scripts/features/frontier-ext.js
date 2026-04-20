@@ -219,7 +219,7 @@
         id: "brandon",
         sprite: "pyramid_king_brandon",
         nameEn: "Pyramid King Brandon",
-        nameFr: "Roi de la Pyramide Bastien",
+        nameFr: "Roi de la Pyramide Bayar",
         teamSilver: ["regirock", "regice", "registeel"],
         teamGold: ["articuno", "zapdos", "moltres"],
       },
