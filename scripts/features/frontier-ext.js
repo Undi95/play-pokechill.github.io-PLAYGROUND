@@ -4167,22 +4167,23 @@
     const mid = document.getElementById("tooltipMid");
     const bottom = document.getElementById("tooltipBottom");
     if (top) top.style.display = "none";
-    if (bottom) bottom.style.display = "none";
+    if (mid) { mid.style.display = "none"; mid.innerHTML = ""; }
     if (title) {
       title.style.display = "block";
+      // Plain text centred title matching the vanilla "VS Zone de Combat"
+      // help tooltip — "VS" prefix instead of an emoji/icon.
       title.innerHTML = lang === "fr"
-        ? "⚔️ Zone de Combat — Hoenn"
-        : "⚔️ Battle Frontier — Hoenn";
+        ? "VS Zone de Combat — Hoenn"
+        : "VS Battle Frontier — Hoenn";
     }
-    if (mid) {
-      mid.style.display = "block";
-      // Condensed 3-line blurb matching the vanilla VS Zone de Combat
-      // tooltip density — one paragraph, centered, beige background
-      // inherited from the tooltipMid base style.
-      const body = lang === "fr"
+    if (bottom) {
+      bottom.style.display = "block";
+      // Body goes in `tooltipBottom` (beige/tan panel) — same slot vanilla
+      // uses for the "Battle Frontier houses different types of challenges"
+      // intro. One condensed paragraph covering the full ruleset.
+      bottom.innerHTML = lang === "fr"
         ? "Règles Gen 3 d'Émeraude : équipes de 3 Pokémon niveau 100, sans restriction de division. Sept facilities aux règles uniques, chacune avec son Meneur ou Meneuse de Zone (symboles Argent &amp; Or, puis revanches post-Or au multiplicateur croissant). « Repos » met une série en pause sans casser le streak ; fermer le jeu pendant une série active compte comme défaite."
         : "Gen 3 Emerald rules: teams of 3 level-100 Pokémon, no division restrictions. Seven facilities each with their own rules and Zone Leader (Silver &amp; Gold symbols, then escalating post-Gold rematches). Rest pauses a run without losing the streak; closing the game mid-active-run counts as defeat.";
-      mid.innerHTML = `<div style="padding:0.6rem 0.9rem; text-align:center; font-weight:bold; line-height:1.45;">${body}</div>`;
     }
   }
 
