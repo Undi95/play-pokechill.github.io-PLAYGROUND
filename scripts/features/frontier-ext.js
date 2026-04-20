@@ -9919,17 +9919,26 @@
     // so Pike keeps the original behaviour unchanged.
     const perRound = battlesPerRound(facility);
     const battleInRound = run.battleInRound || 1;
-    // Pyramid boss combats are driven by the stairs-on-boss-floor tile,
-    // which sets run.pyramidEncounterKind = "brain" just before
-    // launchCombat fires. The floor counter isn't tied to battleInRound
-    // (battleInRound stays at 1 all 7 floors), so without this marker
-    // the brain branch is skipped and the boss ends up with a random
-    // generateTrainer roster instead of Bayar's canonical regis / birds.
+    // Brain-gate. The brain fight must ONLY appear in specific slots:
+    //   • Tower/Palace/Arena/Factory : final battle of a boss round
+    //     (battleInRound === perRound).
+    //   • Pike : ONLY when the player is on the final room (room 14)
+    //     of a boss round. Earlier rooms on the same boss round use
+    //     regular trainers from the door picker; forcing the brain
+    //     path there meant every Pike trainer on the boss round got
+    //     Charline's Seviper/Shuckle/Milotic roster (reported bug).
+    //   • Pyramid : the stairs-on-boss-floor tile sets
+    //     run.pyramidEncounterKind = "brain" right before launchCombat,
+    //     which this marker picks up (battleInRound stays 1 across
+    //     all 7 floors so it can't be used as a proxy).
     const brainDueThisBattle = bossInfo
       && !isDomeFacility(facility)
-      && (isPikeFacility(facility)
-         || (isPyramidFacility(facility) && run.pyramidEncounterKind === "brain")
-         || battleInRound === perRound);
+      && (
+        (isPikeFacility(facility) && run.pikeRoom === PIKE_ROOM_COUNT)
+        || (isPyramidFacility(facility) && run.pyramidEncounterKind === "brain")
+        || (!isPikeFacility(facility) && !isPyramidFacility(facility)
+            && battleInRound === perRound)
+      );
 
     // Regenerate (or keep) the upcoming trainer for this round
     let trainer;
