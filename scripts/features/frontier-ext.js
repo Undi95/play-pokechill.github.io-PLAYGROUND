@@ -4757,21 +4757,20 @@
   // and offensive-move shares per side. Identical structure to the Palace
   // hook: pre-orig snapshot, post-orig diff.
   // ─── ARENA ENEMY-SWAP FREEZE ──────────────────────────────────────────────
-  // Fires whenever a new enemy loads during an Arena run (setWildPkmn wrap).
-  // Goals set by the player: stop the snowball where Pachirisu/Costar/No
-  // Retreat keeps Speed+3+buffs across enemies, and keep players from spam-
-  // attacking DURING the respawn animation before the fresh enemy is at
-  // full HP.
+  // Combat loop is an `animate` function self-scheduled via
+  // requestAnimationFrame (explore.js:3322). Wrapping exploreCombatPlayer/
+  // Wild at their entry points doesn't stop the already-running rAF loop,
+  // so Pachirisu kept attacking during judge verdicts. The clean way to
+  // freeze is to hijack `shouldCombatStop()` (explore.js:2114) — animate
+  // calls it every frame and returns early if it's true. See
+  // installArenaShouldCombatStopHook below.
   //
-  // Two effects per swap:
-  //   1. Strip every stat-up buff from every player slot (atkup1/2, defup,
-  //      satkup, sdefup, speup). Debuffs/status left alone — losing a burn
-  //      because the enemy died would be a silent nerf.
-  //   2. Raise an `arenaSwapFreezing` flag for ARENA_SWAP_FREEZE_MS that
-  //      the existing combat hooks treat identically to `judgeFiring` —
-  //      both exploreCombatPlayer and exploreCombatWild short-circuit
-  //      early, so no attacks land during the load-in window.
-  const ARENA_SWAP_FREEZE_MS = 1200;
+  // This hook only raises the post-swap invincibility flag — strip buffs
+  // reverted per player request, combat HP lock done via shouldCombatStop.
+  // 1s window = both sides are "invincible" (combat frozen) while the
+  // new enemy's sprite + HP settle in. After the window clears, combat
+  // resumes naturally.
+  const ARENA_SWAP_FREEZE_MS = 1000;
   function installArenaSwapFreeze() {
     if (typeof window.setWildPkmn !== "function") {
       setTimeout(installArenaSwapFreeze, 150);
@@ -4787,29 +4786,43 @@
         const state = arenaGetState();
         if (!state) return res;
         // Skip the first setWildPkmn of a combat — that's the initial
-        // enemy load, not a swap. Flag it via `state.initialLoadSeen`.
+        // enemy load, not a swap.
         if (!state.initialLoadSeen) {
           state.initialLoadSeen = true;
           return res;
         }
-        // Strip player stat-up buffs on every active + bench slot.
-        const STAT_UP_RE = /^(atk|satk|def|sdef|spe)up[12]$/;
-        if (typeof team !== "undefined") {
-          for (const sl of ["slot1", "slot2", "slot3"]) {
-            if (!team[sl] || !team[sl].buffs) continue;
-            for (const k of Object.keys(team[sl].buffs)) {
-              if (STAT_UP_RE.test(k)) team[sl].buffs[k] = 0;
-            }
-          }
-          if (typeof updateTeamBuffs === "function") {
-            try { updateTeamBuffs(); } catch (e) { /* ignore */ }
-          }
-        }
-        // Freeze combat ticks for the spawn settle window.
+        // Raise the swap invincibility flag. shouldCombatStop wrap reads
+        // this and returns true for ARENA_SWAP_FREEZE_MS, so no damage
+        // can land on either side during the spawn animation.
         state.arenaSwapFreezing = true;
         setTimeout(() => { state.arenaSwapFreezing = false; }, ARENA_SWAP_FREEZE_MS);
       } catch (e) { console.error("[frontier-ext] arena swap freeze failed:", e); }
       return res;
+    };
+  }
+
+  // Hijack shouldCombatStop so the vanilla combat animation loop (animate
+  // inside exploreCombatWild, explore.js:3322) treats our arena verdict
+  // pause + post-swap invincibility as a legit "stop combat" state.
+  // Without this, the rAF loop keeps ticking during my 3s verdict pause
+  // and Pachirisu one-shots 2–3 enemies while the verdict card is still
+  // on screen — which produced the 2-kill / 3-kill reports.
+  function installArenaShouldCombatStopHook() {
+    if (typeof window.shouldCombatStop !== "function") {
+      setTimeout(installArenaShouldCombatStopHook, 150);
+      return;
+    }
+    if (window.__arenaShouldCombatStopHooked) return;
+    window.__arenaShouldCombatStopHooked = true;
+    const orig = window.shouldCombatStop;
+    window.shouldCombatStop = function () {
+      try {
+        if (isInArenaRun()) {
+          const s = arenaGetState();
+          if (s && (s.judgeFiring || s.arenaSwapFreezing)) return true;
+        }
+      } catch (e) { /* fall through to orig */ }
+      return orig.apply(this, arguments);
     };
   }
 
@@ -8579,6 +8592,7 @@
     installPalaceEnemyHook();
     installArenaCombatHooks();
     installArenaSwapFreeze();
+    installArenaShouldCombatStopHook();
     installTeamSanitizerHooks();
     installDomeTeamFilter();
     installPikeHpRestoreHook();
