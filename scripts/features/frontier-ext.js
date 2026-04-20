@@ -6557,7 +6557,8 @@
     { id: "chestoBerry", labelFr: "Baie Maron",   labelEn: "Chesto Berry",  kind: "cure", cure: "sleep" },
     { id: "pechaBerry",  labelFr: "Baie Pêcha",   labelEn: "Pecha Berry",   kind: "cure", cure: "poisoned" },
     { id: "rawstBerry",  labelFr: "Baie Fraive",  labelEn: "Rawst Berry",   kind: "cure", cure: "burn" },
-    { id: "aspearBerry", labelFr: "Baie Mepo",    labelEn: "Aspear Berry",  kind: "cure", cure: "freeze" },
+    // aspearBerry (freeze) dropped — Pokechill doesn't actually apply a
+    // freeze status in combat, so the cure has nothing to act on.
     { id: "persimBerry", labelFr: "Baie Prine",   labelEn: "Persim Berry",  kind: "cure", cure: "confused" },
     { id: "hyperPotion", labelFr: "Hyper Potion", labelEn: "Hyper Potion",  kind: "heal", ratio: 0.6 },
     { id: "fullRestore", labelFr: "Guérison",     labelEn: "Full Restore",  kind: "heal_full_cure" },
