@@ -2502,6 +2502,10 @@
         padding: 0.2rem 0.5rem;
         font-size: 0.75rem;
       }
+      .frontier-ext-pyr-bag-row .frontier-ext-action-btn.small.danger {
+        background: linear-gradient(180deg, #802020 0%, #501010 100%);
+        border-color: rgba(255, 120, 120, 0.5);
+      }
       .frontier-ext-pyr-bag-row .held-pill {
         font-size: 0.72rem;
         opacity: 0.6;
@@ -7065,16 +7069,22 @@
   ];
 
   // Inject a status move into slot1 of a wild's moveset IF the species
-  // can actually learn it. Reads the species movepool so we don't
-  // fabricate illegal moves that would fail to render.
+  // can actually learn it. Pokechill doesn't store a per-species
+  // movepool — instead each move[id] declares a `moveset: [types…]`
+  // list of types that can learn it. A species can learn the move iff
+  // one of its types appears in that list.
   function biasPyramidWildMoveset(speciesId, moveset) {
     if (!Array.isArray(moveset) || !speciesId) return;
     if (typeof pkmn === "undefined" || !pkmn[speciesId]) return;
-    const pool = pkmn[speciesId].movepool;
-    if (!Array.isArray(pool) || !pool.length) return;
-    // Find the first status-move candidate this species knows.
-    const poolSet = new Set(pool);
-    const candidates = PYRAMID_WILD_STATUS_MOVES.filter((mv) => poolSet.has(mv));
+    if (typeof move === "undefined") return;
+    const p = pkmn[speciesId];
+    const types = (Array.isArray(p.type) ? p.type : [p.type]).filter(Boolean);
+    const canLearn = (mvKey) => {
+      const def = move[mvKey];
+      if (!def || !Array.isArray(def.moveset)) return false;
+      return types.some((t) => def.moveset.includes(t));
+    };
+    const candidates = PYRAMID_WILD_STATUS_MOVES.filter(canLearn);
     if (!candidates.length) return;
     // Skip if the rolled moveset already carries one of them.
     for (const mv of moveset) if (candidates.includes(mv)) return;
@@ -7269,20 +7279,97 @@
   // alike — go straight into the Combat Bag). No auto-apply: the
   // player opens the bag later to use a consumable on a specific
   // Pokémon, which matches canonical Gen 3 Pyramid bag semantics.
+  //
+  // If the bag is already full of distinct ids AND the incoming item
+  // is a new one, we open a "bag full — choose one to drop" picker
+  // instead of silently trashing the pickup.
   function takePyramidItem(facility, itemId) {
     const run = saved.frontierExt.activeRun;
     if (!run) return;
     const def = pyramidItemDef(itemId);
     if (!def) { pyramidAfterEvent(facility); return; }
     const bag = pyramidEnsureBag(run);
-    const hasRoom = !!bag.items.find((it) => it.id === itemId) || bag.items.length < bag.cap;
-    if (!hasRoom) {
-      // Bag full: drop the item and advance with no effect.
-      pyramidAfterEvent(facility);
+    const alreadyIn = !!bag.items.find((it) => it.id === itemId);
+    if (!alreadyIn && bag.items.length >= bag.cap) {
+      showPyramidBagFullPicker(facility, itemId);
       return;
     }
     pyramidAddToBag(run, itemId);
     pyramidAfterEvent(facility);
+  }
+
+  // Shown when the player picks up a NEW item id while the bag holds
+  // PYRAMID_BAG_CAP distinct ids. Lists every existing bag entry as a
+  // "drop" button; clicking drops ALL units of that id and inserts the
+  // new find. A "Jeter le nouvel objet" action lets the player keep
+  // the bag as-is and abandon the find.
+  function showPyramidBagFullPicker(facility, newItemId) {
+    const run = saved.frontierExt.activeRun;
+    if (!run) return;
+    const def = pyramidItemDef(newItemId);
+    if (!def) { pyramidAfterEvent(facility); return; }
+    pyramidEnsureBag(run);
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const newLabel = lang === "fr" ? def.labelFr : def.labelEn;
+    const top = document.getElementById("tooltipTop");
+    const titleEl = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+    const t = lang === "fr"
+      ? { title: "Sac plein — que jeter ?",
+          body: (n) => `Tu as trouvé <strong>${n}</strong>, mais ton Sac est plein. Choisis un objet à jeter pour le remplacer, ou abandonne la trouvaille.`,
+          drop: "Jeter",
+          abandon: "Jeter le nouvel objet" }
+      : { title: "Bag full — what to drop?",
+          body: (n) => `You found <strong>${n}</strong>, but your Bag is full. Pick an item to drop and replace, or abandon the find.`,
+          drop: "Drop",
+          abandon: "Abandon the new item" };
+
+    if (top) top.style.display = "none";
+    if (titleEl) { titleEl.style.display = "block"; titleEl.innerHTML = t.title; }
+    if (mid) {
+      mid.style.display = "block";
+      const rows = run.combatBag.items.map((it) => {
+        const idef = pyramidItemDef(it.id);
+        const label = idef ? (lang === "fr" ? idef.labelFr : idef.labelEn) : it.id;
+        const sprite = pyramidItemSprite(it.id);
+        const icon = sprite
+          ? `<img src="${sprite}" alt="${label}" style="width:20px;height:20px;image-rendering:pixelated;vertical-align:middle;">`
+          : `<span class="frontier-ext-pyr-bag-icon">📦</span>`;
+        return `
+          <li class="frontier-ext-pyr-bag-row">
+            <span class="icon">${icon}</span>
+            <span class="label">${label}</span>
+            <span class="count">×${it.count}</span>
+            <button class="frontier-ext-action-btn small danger" data-pyr-drop="${it.id}">${t.drop}</button>
+          </li>`;
+      }).join("");
+      mid.innerHTML = `
+        <div class="frontier-ext-pyr-bag">
+          <div class="cap">${t.body(newLabel)}</div>
+          <ul class="frontier-ext-pyr-bag-list">${rows}</ul>
+        </div>`;
+      mid.querySelectorAll("[data-pyr-drop]").forEach((btn) => {
+        btn.onclick = () => {
+          const dropId = btn.dataset.pyrDrop;
+          // Remove every unit of the chosen id, insert the new one.
+          run.combatBag.items = run.combatBag.items.filter((it) => it.id !== dropId);
+          pyramidAddToBag(run, newItemId);
+          pyramidAfterEvent(facility);
+        };
+      });
+    }
+    if (bottom) {
+      bottom.style.display = "block";
+      bottom.innerHTML = `
+        <div class="frontier-ext-run-actions">
+          <button class="frontier-ext-action-btn" data-pyr-drop-new="1">${t.abandon}</button>
+        </div>`;
+      bottom.querySelectorAll("[data-pyr-drop-new]").forEach((btn) => {
+        btn.onclick = () => pyramidAfterEvent(facility);
+      });
+    }
+    if (typeof openTooltip === "function") openTooltip();
   }
 
   // Remove one unit of `id` from the bag. If the entry's count drops
