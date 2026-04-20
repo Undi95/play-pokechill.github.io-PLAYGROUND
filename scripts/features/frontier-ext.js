@@ -7082,7 +7082,7 @@
         const id = theme.pool[Math.floor(Math.random() * theme.pool.length)];
         const diff = computeRunDifficulty(run.round + 1, facility);
         const moves = pickMovesetFor(id, diff);
-        biasPyramidWildMoveset(id, moves);
+        biasPyramidWildMoveset(id, moves, theme.key);
         const wildTrainer = {
           name: window.gameLang === "fr" ? "Pokémon sauvage" : "Wild Pokémon",
           sprite: "hiker",
@@ -7248,12 +7248,30 @@
     "glare",        // paralysis (snake-like)
   ];
 
+  // Per-theme preferred status-move pool. When the current Pyramid
+  // theme calls for a specific status (Paralysie / Poison / Brûlure),
+  // the bias narrows to just moves that INFLICT that status so the
+  // floor's flavour actually delivers. Non-status themes (Ice / Psy /
+  // Rock / …) fall back to the full PYRAMID_WILD_STATUS_MOVES pool,
+  // since the theme is about species typing, not a specific ailment.
+  const PYRAMID_THEME_PREFERRED_STATUS_MOVES = {
+    paralysis: ["thunderWave", "stunSpore", "glare"],
+    poison:    ["toxic", "poisonPowder"],
+    burn:      ["willOWisp"],
+  };
+
   // Inject a status move into slot1 of a wild's moveset IF the species
   // can actually learn it. Pokechill doesn't store a per-species
   // movepool — instead each move[id] declares a `moveset: [types…]`
   // list of types that can learn it. A species can learn the move iff
   // one of its types appears in that list.
-  function biasPyramidWildMoveset(speciesId, moveset) {
+  //
+  // When `themeKey` matches a status theme (paralysis / poison / burn),
+  // candidates are narrowed to moves of that status first — so a wild
+  // Rafflesia on the "Paralysie" floor rolls stunSpore, not toxic.
+  // If the species can't learn any of the theme-preferred moves, we
+  // fall back to the full pool so there's SOMETHING to annoy with.
+  function biasPyramidWildMoveset(speciesId, moveset, themeKey) {
     if (!Array.isArray(moveset) || !speciesId) return;
     if (typeof pkmn === "undefined" || !pkmn[speciesId]) return;
     if (typeof move === "undefined") return;
@@ -7264,7 +7282,9 @@
       if (!def || !Array.isArray(def.moveset)) return false;
       return types.some((t) => def.moveset.includes(t));
     };
-    const candidates = PYRAMID_WILD_STATUS_MOVES.filter(canLearn);
+    const preferred = themeKey && PYRAMID_THEME_PREFERRED_STATUS_MOVES[themeKey];
+    let candidates = preferred ? preferred.filter(canLearn) : [];
+    if (!candidates.length) candidates = PYRAMID_WILD_STATUS_MOVES.filter(canLearn);
     if (!candidates.length) return;
     // Skip if the rolled moveset already carries one of them.
     for (const mv of moveset) if (candidates.includes(mv)) return;
