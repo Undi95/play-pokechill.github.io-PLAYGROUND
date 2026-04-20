@@ -5502,6 +5502,37 @@
     };
   }
 
+  // Pyramid status-persistence hook. Wild encounters bias their slot-1
+  // move toward status infliction (biasPyramidWildMoveset), but vanilla
+  // moveBuff caps paralysis at 2 turns and the rest at 3 — after which
+  // the status clears mid-battle and the pressure fades. In the Pyramid
+  // we want statuses to STICK (like Pike's trap rooms) so the player
+  // is forced to spend items. When a status buff is being applied in a
+  // Pyramid run with no explicit turnOverride, force turnOverride = 99
+  // (same constant Pike uses; effectively "whole combat"). Other buff
+  // types — stat boosts/drops, confusion, etc. — are untouched so
+  // temporary combat dynamics still behave normally.
+  function installPyramidStatusStickHook() {
+    if (typeof window.moveBuff !== "function") {
+      setTimeout(installPyramidStatusStickHook, 200);
+      return;
+    }
+    if (window.__frontierExtPyrStatusStickHooked) return;
+    window.__frontierExtPyrStatusStickHooked = true;
+    const STATUS_RX = /^(burn|freeze|paralysis|poisoned|sleep)$/;
+    const orig = window.moveBuff;
+    window.moveBuff = function (target, buff, mod, turnOverride) {
+      try {
+        if (turnOverride === undefined
+            && typeof buff === "string" && STATUS_RX.test(buff)
+            && isInPyramidRun()) {
+          return orig.call(this, target, buff, mod, PIKE_STATUS_TURNS);
+        }
+      } catch (e) { /* fall through to orig */ }
+      return orig.apply(this, arguments);
+    };
+  }
+
   function installArenaCombatHooks() {
     if (typeof window.exploreCombatPlayer !== "function"
      || typeof window.exploreCombatWild !== "function") {
@@ -10536,6 +10567,7 @@
     installDomeTeamFilter();
     installPikeHpRestoreHook();
     installPyramidEquipSync();
+    installPyramidStatusStickHook();
     installTeamMenuLockHook();
     installTeamMenuObserver();
     installTeamLockEventFilter();
