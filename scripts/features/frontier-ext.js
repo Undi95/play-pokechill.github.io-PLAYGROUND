@@ -7254,11 +7254,14 @@
     "willOWisp",    // burn (fire / ghost)
     "thunderWave",  // paralysis (electric / psychic / ghost / fairy)
     "stunSpore",    // paralysis (grass)
-    "toxic",        // bad poison (broad)
+    "toxic",        // bad poison (poison / all)
     "poisonPowder", // plain poison (grass)
-    "confuseRay",   // confusion (ghost)
-    "swagger",      // attack boost + confusion (broad)
-    "glare",        // paralysis (snake-like)
+    "confuseRay",   // confusion (ghost / psychic / all)
+    "swagger",      // attack boost + confusion (all)
+    // `glare` (canonical paralysis for snake-line mons) dropped: not
+    // declared in Pokechill's moveDictionary. Any bias entry here MUST
+    // exist upstream, otherwise slot-1 inherits a ghost move key that
+    // renders blank in combat.
   ];
 
   // Per-theme preferred status-move pool. When the current Pyramid
@@ -7268,7 +7271,7 @@
   // Rock / …) fall back to the full PYRAMID_WILD_STATUS_MOVES pool,
   // since the theme is about species typing, not a specific ailment.
   const PYRAMID_THEME_PREFERRED_STATUS_MOVES = {
-    paralysis: ["thunderWave", "stunSpore", "glare"],
+    paralysis: ["thunderWave", "stunSpore"],
     poison:    ["toxic", "poisonPowder"],
     burn:      ["willOWisp"],
   };
@@ -7293,11 +7296,14 @@
     const canLearn = (mvKey) => {
       const def = move[mvKey];
       if (!def || !Array.isArray(def.moveset)) return false;
-      // Pokechill uses "all" as a universal-learn marker. Without this
-      // gate, Butterfree / Skarmory / other non-poison Pokémon on the
-      // Poison theme couldn't roll Toxic (moveset: ["poison", "all"])
-      // and the bias silently failed — no status move got injected.
+      // Pokechill's pickMovesetFor treats "all" AND "normal" as
+      // universal-learn markers (line 1313-1314). Mirror both here so
+      // this bias accepts the same move set the main generator does
+      // — without the two gates, Butterfree on Poison theme couldn't
+      // roll Toxic (moveset ["poison", "all"]) and the bias silently
+      // failed.
       if (def.moveset.includes("all")) return true;
+      if (def.moveset.includes("normal")) return true;
       return types.some((t) => def.moveset.includes(t));
     };
     const preferred = themeKey && PYRAMID_THEME_PREFERRED_STATUS_MOVES[themeKey];
