@@ -2364,6 +2364,119 @@
         font-style: normal;
         text-shadow: 0 0 4px rgba(255, 100, 100, 0.5);
       }
+      /* Theme header strip at the top of the Pyramid floor map. */
+      .frontier-ext-pyr-theme-bar {
+        text-align: center;
+        padding: 0.35rem 0.8rem;
+        font-size: 0.88rem;
+        color: #ffd98a;
+        background: rgba(0, 0, 0, 0.25);
+        border-radius: 0.3rem;
+        margin: 0 0.5rem 0.35rem;
+        letter-spacing: 0.02em;
+      }
+      .frontier-ext-pyr-theme-bar strong { color: #fff; font-weight: 600; }
+      /* Side-action row — Kinésiste + Combat Bag buttons. */
+      .frontier-ext-pyr-side-actions {
+        display: flex;
+        gap: 0.4rem;
+        justify-content: center;
+        padding: 0.4rem 0.6rem 0.2rem;
+        flex-wrap: wrap;
+      }
+      .frontier-ext-pyr-side-actions .frontier-ext-action-btn {
+        font-size: 0.82rem;
+        padding: 0.3rem 0.6rem;
+      }
+      /* Item-found modal content. */
+      .frontier-ext-pyr-item-found {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.8rem 0.6rem;
+      }
+      .frontier-ext-pyr-item-found .headline {
+        font-weight: bold;
+        color: #ffd98a;
+        font-size: 1rem;
+      }
+      .frontier-ext-pyr-item-found .label {
+        font-size: 1.1rem;
+        color: #fff;
+        font-weight: 600;
+      }
+      .frontier-ext-pyr-item-found .bag-count {
+        font-size: 0.8rem;
+        opacity: 0.7;
+      }
+      .frontier-ext-pyr-item-found .bag-full {
+        color: #ff9090;
+        font-size: 0.85rem;
+        font-weight: bold;
+      }
+      .frontier-ext-pyr-item-placeholder {
+        font-size: 2rem;
+        line-height: 1;
+      }
+      /* Kinésiste dialog. */
+      .frontier-ext-pyr-kinesiste {
+        padding: 0.8rem 0.6rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+        color: #f2d999;
+      }
+      .frontier-ext-pyr-kinesiste .intro {
+        font-style: italic;
+        text-align: center;
+        color: #e0b0ff;
+      }
+      .frontier-ext-pyr-kinesiste .theme-line {
+        display: flex;
+        justify-content: space-between;
+        padding: 0.25rem 0.5rem;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 0.25rem;
+      }
+      .frontier-ext-pyr-kinesiste .theme-line.next {
+        background: rgba(80, 40, 120, 0.35);
+        color: #fff;
+      }
+      .frontier-ext-pyr-kinesiste .lbl { opacity: 0.75; font-size: 0.88rem; }
+      .frontier-ext-pyr-kinesiste .val { font-weight: bold; }
+      /* Combat Bag viewer. */
+      .frontier-ext-pyr-bag {
+        padding: 0.6rem;
+        color: #f2d999;
+      }
+      .frontier-ext-pyr-bag .cap {
+        text-align: center;
+        font-size: 0.85rem;
+        opacity: 0.8;
+        margin-bottom: 0.35rem;
+      }
+      .frontier-ext-pyr-bag-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.18rem;
+      }
+      .frontier-ext-pyr-bag-row {
+        display: grid;
+        grid-template-columns: 2rem 1fr auto;
+        gap: 0.4rem;
+        align-items: center;
+        padding: 0.2rem 0.4rem;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 0.25rem;
+        font-size: 0.88rem;
+      }
+      .frontier-ext-pyr-bag-row .icon { text-align: center; }
+      .frontier-ext-pyr-bag-row .count { opacity: 0.8; font-weight: bold; }
+      .frontier-ext-pyr-bag-row.empty { text-align: center; opacity: 0.6; grid-template-columns: 1fr; }
       /* Pyramid modal gets the same size override as Factory. */
       #tooltipBox.frontier-ext-pyramid-open {
         max-height: 92vh !important;
@@ -4058,7 +4171,21 @@
       if (isPikeFacility(facility)) initPikeTeamFromPreview();
       // Pyramid also needs the runTeam snapshot (HP/status persist via
       // the same pikeTeam structure — facility has persistHpStatus flag).
-      if (isPyramidFacility(facility)) initPikeTeamFromPreview();
+      if (isPyramidFacility(facility)) {
+        initPikeTeamFromPreview();
+        const newRun = saved.frontierExt.activeRun;
+        // Canonical rule: Pokémon registered for the Pyramid cannot hold
+        // items at entry. Strip held items from the run's pikeTeam copy
+        // so combat sees item=null; the player's preview team is left
+        // untouched (items live in saved.previewTeams, not on the copy).
+        stripPyramidHeldItems(newRun);
+        // Init theme index + Combat Bag. The theme index only advances
+        // on successful round clears; losing a run nulls activeRun and
+        // the next start therefore begins at theme 0 — matches the
+        // canonical "perdre = retour au premier thème" rule.
+        if (typeof newRun.pyramidThemeIndex !== "number") newRun.pyramidThemeIndex = 0;
+        pyramidEnsureBag(newRun);
+      }
       if (isDomeFacility(facility)) openDomeBracketPreview(facility);
       else if (isPikeFacility(facility)) openPikeRoomPreview(facility);
       else if (isFactoryFacility(facility)) openFactoryRentalSelection(facility);
@@ -4109,6 +4236,29 @@
         return;
       }
       pikeAdvanceAfterEvent(facility);
+      return;
+    }
+    // Pyramid — item-tile "Prendre" button: push into Combat Bag, apply
+    // effect if consumable, return to the floor map. Button data-attr
+    // carries the rolled item id (see showPyramidItemFoundModal).
+    if (action === "pyr-take-item") {
+      if (!isPyramidFacility(facility)) return;
+      const btn = document.querySelector("[data-action='pyr-take-item']");
+      const itemId = btn && btn.dataset.itemId;
+      if (itemId) takePyramidItem(facility, itemId);
+      else pyramidAfterEvent(facility);
+      return;
+    }
+    if (action === "pyr-kinesiste-open") {
+      if (isPyramidFacility(facility)) showPyramidKinesisteDialog(facility);
+      return;
+    }
+    if (action === "pyr-bag-open") {
+      if (isPyramidFacility(facility)) showPyramidBagDialog(facility);
+      return;
+    }
+    if (action === "pyr-kinesiste-close" || action === "pyr-bag-close") {
+      if (isPyramidFacility(facility)) openPyramidFloorMap(facility);
       return;
     }
     // Round-cleared modal: "Continue" validates the team size (the player
@@ -6032,12 +6182,130 @@
     STAIRS: "stairs",
     TRAINER: "trainer",
     WILD: "wild",
+    ITEM: "item",
+    // Legacy (kept for in-flight saves from before the item rework).
+    // Generator no longer produces these — applyPyramidTile maps them
+    // to safe no-ops / item equivalents on resolve.
     HEAL_FULL: "healFull",
     HEAL_PARTIAL: "healHalf",
     CURE_STATUS: "cure",
   };
   // Visible revealed tiles have type info shown; unrevealed show "?" .
   // Walls are always visible (structural) even before reveal.
+
+  // ─── 6d2. PYRAMID — Canonical Gen 3 Emerald rules ──────────────────────
+  // (separated from Pike: trainers have 1 Pokémon, wild encounters follow
+  // a per-series theme, item tiles drop into a persistent "Sac de Combat"
+  // whose contents carry over between successful rounds.)
+  //
+  // Theme rotation: each series (set of 7 floors cleared) shifts the
+  // theme index one step. 20 themes cycle in a determined order — per
+  // the user's spec, losing resets the index to 0 ("Si vous perdez, vous
+  // revenez à la première série"). A "Kinésiste" NPC (button in the
+  // floor map) reveals the upcoming theme before entry so the player can
+  // plan their team composition.
+  const PYRAMID_THEMES = [
+    { key: "paralysis",   labelFr: "Paralysie",             labelEn: "Paralysis",
+      pool: ["plusle", "minun", "pikachu", "electabuzz", "vileplume", "manectric", "breloom", "jolteon"] },
+    { key: "poison",      labelFr: "Poison",                labelEn: "Poison",
+      pool: ["gulpin", "roselia", "butterfree", "seviper", "skarmory", "ludicolo", "crobat", "gengar"] },
+    { key: "burn",        labelFr: "Brûlure",               labelEn: "Burn",
+      pool: ["growlithe", "vulpix", "magcargo", "ninetales", "medicham", "weezing", "dusclops", "houndoom"] },
+    { key: "iceType",     labelFr: "Type Glace",            labelEn: "Ice type",
+      pool: ["glalie", "sneasel", "dewgong", "piloswine", "jynx", "cloyster", "walrein", "lapras"] },
+    { key: "psyType",     labelFr: "Type Psy",              labelEn: "Psychic type",
+      pool: ["wobbuffet", "metang", "exeggutor", "slowking", "xatu", "alakazam", "starmie", "espeon"] },
+    { key: "rockType",    labelFr: "Type Roche",            labelEn: "Rock type",
+      pool: ["golem", "steelix", "omastar", "lunatone", "shuckle", "armaldo", "cradily", "aerodactyl"] },
+    { key: "fightType",   labelFr: "Type Combat",           labelEn: "Fighting type",
+      pool: ["poliwrath", "hariyama", "breloom", "medicham", "hitmonchan", "hitmonlee", "heracross", "machamp"] },
+    { key: "weather",     labelFr: "Météo",                 labelEn: "Weather",
+      pool: ["quagsire", "tropius", "pupitar", "lapras", "cacturne", "flareon", "walrein", "gyarados"] },
+    { key: "bugType",     labelFr: "Type Insecte",          labelEn: "Bug type",
+      pool: ["pineco", "shuckle", "venomoth", "scizor", "heracross", "forretress", "armaldo", "shedinja"] },
+    { key: "darkType",    labelFr: "Type Ténèbres",         labelEn: "Dark type",
+      pool: ["sableye", "sneasel", "crawdaunt", "shiftry", "cacturne", "absol", "houndoom", "umbreon"] },
+    { key: "waterType",   labelFr: "Type Eau",              labelEn: "Water type",
+      pool: ["octillery", "dewgong", "pelipper", "quagsire", "ludicolo", "slowking", "starmie", "blastoise"] },
+    { key: "ghostType",   labelFr: "Type Spectre",          labelEn: "Ghost type",
+      pool: ["duskull", "haunter", "banette", "misdreavus", "sableye", "dusclops", "shedinja", "gengar"] },
+    { key: "steelType",   labelFr: "Type Acier",            labelEn: "Steel type",
+      pool: ["mawile", "magneton", "steelix", "scizor", "forretress", "skarmory", "aggron", "metagross"] },
+    { key: "flyDragon",   labelFr: "Types Vol et Dragon",   labelEn: "Flying & Dragon",
+      pool: ["dragonair", "vibrava", "altaria", "flygon", "aerodactyl", "gyarados", "kingdra", "charizard"] },
+    { key: "evoStones",   labelFr: "Pierres d'évolution",   labelEn: "Evolution stones",
+      pool: ["arcanine", "poliwrath", "raichu", "vaporeon", "jolteon", "flareon", "ninetales", "starmie"] },
+    { key: "normalType",  labelFr: "Type Normal",           labelEn: "Normal type",
+      pool: ["kangaskhan", "swellow", "ursaring", "porygon2", "tauros", "fearow", "snorlax", "slaking"] },
+  ];
+  // NOTE: Bulbapedia lists 20 themes for the vanilla Pyramid but 4 are
+  // mechanic-themed (HP points / Levitation / Trap / Self-destruct) that
+  // don't map cleanly to Pokechill's state model. Per user, those were
+  // struck out of the rotation — we ship the 16 type/status themes that
+  // DO translate cleanly.
+
+  const PYRAMID_THEME_COUNT = PYRAMID_THEMES.length;
+
+  function pyramidCurrentTheme(run) {
+    if (!run) return PYRAMID_THEMES[0];
+    const idx = ((run.pyramidThemeIndex | 0) % PYRAMID_THEME_COUNT + PYRAMID_THEME_COUNT) % PYRAMID_THEME_COUNT;
+    return PYRAMID_THEMES[idx];
+  }
+  function pyramidNextTheme(run) {
+    if (!run) return PYRAMID_THEMES[0];
+    const idx = ((((run.pyramidThemeIndex | 0) + 1) % PYRAMID_THEME_COUNT) + PYRAMID_THEME_COUNT) % PYRAMID_THEME_COUNT;
+    return PYRAMID_THEMES[idx];
+  }
+
+  // Canonical Pyramid loot. Mix of consumables (immediate effect when
+  // taken) and held items (stored in the bag, applied to a team slot
+  // later via the bag UI). Items crossed out by the user in the source
+  // table are NOT listed here.
+  //
+  //   kind semantics:
+  //     cure(status)       — immediate: clear the named status on one
+  //                          slot that has it; shown as 🍒 consumable
+  //     heal(ratio)        — immediate: raise hpRatio by ratio, cap 1.0
+  //     heal_full_cure     — immediate: hpRatio=1, status=null
+  //     revive(ratio)      — immediate: revives a fainted slot to ratio
+  //     held               — stored in bag; held-item assignment to a
+  //                          team slot happens via the bag UI (later).
+  const PYRAMID_ITEMS = [
+    { id: "cheriBerry",  labelFr: "Baie Ceriz",   labelEn: "Cheri Berry",   kind: "cure", cure: "paralysis" },
+    { id: "chestoBerry", labelFr: "Baie Maron",   labelEn: "Chesto Berry",  kind: "cure", cure: "sleep" },
+    { id: "pechaBerry",  labelFr: "Baie Pêcha",   labelEn: "Pecha Berry",   kind: "cure", cure: "poisoned" },
+    { id: "rawstBerry",  labelFr: "Baie Fraive",  labelEn: "Rawst Berry",   kind: "cure", cure: "burn" },
+    { id: "aspearBerry", labelFr: "Baie Mepo",    labelEn: "Aspear Berry",  kind: "cure", cure: "freeze" },
+    { id: "persimBerry", labelFr: "Baie Prine",   labelEn: "Persim Berry",  kind: "cure", cure: "confused" },
+    { id: "hyperPotion", labelFr: "Hyper Potion", labelEn: "Hyper Potion",  kind: "heal", ratio: 0.6 },
+    { id: "fullRestore", labelFr: "Guérison",     labelEn: "Full Restore",  kind: "heal_full_cure" },
+    { id: "revive",      labelFr: "Rappel",       labelEn: "Revive",        kind: "revive", ratio: 0.5 },
+    { id: "maxRevive",   labelFr: "Rappel Max",   labelEn: "Max Revive",    kind: "revive", ratio: 1.0 },
+    // Held items — stored in the bag, no immediate effect on pickup.
+    { id: "choiceBand",  labelFr: "Band. Choix",  labelEn: "Choice Band",   kind: "held" },
+    { id: "muscleBand",  labelFr: "Muscle",       labelEn: "Muscle Band",   kind: "held" },
+    { id: "wideLens",    labelFr: "Précision",    labelEn: "Wide Lens",     kind: "held" },
+    { id: "leftovers",   labelFr: "Restes",       labelEn: "Leftovers",     kind: "held" },
+    { id: "quickClaw",   labelFr: "Vive Griffe",  labelEn: "Quick Claw",    kind: "held" },
+  ];
+
+  const PYRAMID_BAG_CAP = 10; // max 10 distinct item ids in the Combat Bag
+
+  function pyramidItemDef(id) {
+    return PYRAMID_ITEMS.find((it) => it.id === id) || null;
+  }
+  function pyramidItemLabel(id, lang) {
+    const def = pyramidItemDef(id);
+    if (!def) return id;
+    return lang === "fr" ? def.labelFr : def.labelEn;
+  }
+  function pyramidItemSprite(id) {
+    // Use Pokechill's sprite only when the underlying item exists in the
+    // game's item registry (choiceBand / leftovers / quickClaw do).
+    // Otherwise return null — the UI renders a plain label card.
+    if (typeof item === "undefined" || !item[id]) return null;
+    return item[id].sprite || null;
+  }
 
   function isPyramidFacility(facility) {
     return !!(facility && facility.rules && facility.rules.gridNav);
@@ -6054,12 +6322,17 @@
   const PYR_TILE_SVG = {
     floor: `<svg viewBox="0 0 16 16" preserveAspectRatio="none"><rect width="16" height="16" fill="#c9a86a"/><rect x="2" y="3" width="2" height="1" fill="#a98848"/><rect x="10" y="6" width="1" height="1" fill="#a98848"/><rect x="5" y="10" width="2" height="1" fill="#a98848"/><rect x="12" y="12" width="1" height="2" fill="#a98848"/><rect x="1" y="14" width="1" height="1" fill="#a98848"/></svg>`,
     wall: `<svg viewBox="0 0 16 16" preserveAspectRatio="none"><rect width="16" height="16" fill="#4a3520"/><rect x="0" y="0" width="16" height="1" fill="#6a4f30"/><rect x="0" y="4" width="16" height="1" fill="#2a1d10"/><rect x="5" y="1" width="1" height="3" fill="#2a1d10"/><rect x="11" y="1" width="1" height="3" fill="#2a1d10"/><rect x="0" y="8" width="16" height="1" fill="#2a1d10"/><rect x="2" y="5" width="1" height="3" fill="#2a1d10"/><rect x="8" y="5" width="1" height="3" fill="#2a1d10"/><rect x="14" y="5" width="1" height="3" fill="#2a1d10"/><rect x="0" y="12" width="16" height="1" fill="#2a1d10"/><rect x="5" y="9" width="1" height="3" fill="#2a1d10"/><rect x="11" y="9" width="1" height="3" fill="#2a1d10"/><rect x="2" y="13" width="1" height="3" fill="#2a1d10"/><rect x="8" y="13" width="1" height="3" fill="#2a1d10"/><rect x="14" y="13" width="1" height="3" fill="#2a1d10"/></svg>`,
-    stairs: `<svg viewBox="0 0 16 16" preserveAspectRatio="none"><rect width="16" height="16" fill="#c9a86a"/><rect x="2" y="12" width="12" height="2" fill="#7a5a30"/><rect x="3" y="9" width="10" height="2" fill="#9a7a40"/><rect x="4" y="6" width="8" height="2" fill="#b08a50"/><rect x="5" y="3" width="6" height="2" fill="#c99a60"/><rect x="6" y="1" width="4" height="1" fill="#ffd98a"/></svg>`,
+    // Stairs tile rendered as a flat blue rectangle per user spec —
+    // reads unambiguously as "exit / advance" without looking like a
+    // decorative tile.
+    stairs: `<svg viewBox="0 0 16 16" preserveAspectRatio="none"><rect width="16" height="16" fill="#c9a86a"/><rect x="2" y="4" width="12" height="8" fill="#3060c0" stroke="#2040a0" stroke-width="1"/></svg>`,
     question: `<svg viewBox="0 0 16 16" preserveAspectRatio="none"><rect width="16" height="16" fill="#c9a86a"/><text x="8" y="13" font-size="12" font-weight="bold" text-anchor="middle" fill="#5a3020" font-family="monospace">?</text></svg>`,
     heal: `<svg viewBox="0 0 16 16" preserveAspectRatio="none"><rect width="16" height="16" fill="#c9a86a"/><rect x="5" y="2" width="6" height="12" fill="#f86060"/><rect x="2" y="5" width="12" height="6" fill="#f86060"/><rect x="6" y="3" width="4" height="10" fill="#ff8080"/><rect x="3" y="6" width="10" height="4" fill="#ff8080"/></svg>`,
     cure: `<svg viewBox="0 0 16 16" preserveAspectRatio="none"><rect width="16" height="16" fill="#c9a86a"/><circle cx="8" cy="8" r="5" fill="#70e070"/><rect x="7" y="4" width="2" height="8" fill="#ffffff"/><rect x="4" y="7" width="8" height="2" fill="#ffffff"/></svg>`,
     trainer: `<svg viewBox="0 0 16 16" preserveAspectRatio="none"><rect width="16" height="16" fill="#c9a86a"/><rect x="6" y="2" width="4" height="3" fill="#2a1a0a"/><rect x="5" y="5" width="6" height="6" fill="#5080d0"/><rect x="4" y="11" width="3" height="3" fill="#2a1a0a"/><rect x="9" y="11" width="3" height="3" fill="#2a1a0a"/></svg>`,
     wild: `<svg viewBox="0 0 16 16" preserveAspectRatio="none"><rect width="16" height="16" fill="#c9a86a"/><rect x="4" y="4" width="2" height="2" fill="#5a8030"/><rect x="10" y="3" width="3" height="3" fill="#5a8030"/><rect x="7" y="8" width="2" height="2" fill="#5a8030"/><rect x="3" y="11" width="3" height="2" fill="#5a8030"/><rect x="11" y="12" width="2" height="2" fill="#5a8030"/></svg>`,
+    // Item tile — small pouch / gift silhouette on the pyramid floor.
+    item: `<svg viewBox="0 0 16 16" preserveAspectRatio="none"><rect width="16" height="16" fill="#c9a86a"/><rect x="5" y="6" width="6" height="7" fill="#d07030" stroke="#8a4018" stroke-width="1"/><rect x="4" y="5" width="8" height="2" fill="#e08040" stroke="#8a4018" stroke-width="1"/><rect x="7" y="5" width="2" height="8" fill="#ffd060"/><rect x="6" y="3" width="4" height="3" fill="#ffd060"/></svg>`,
     fog: `<svg viewBox="0 0 16 16" preserveAspectRatio="none"><rect width="16" height="16" fill="#2a1a14"/><rect x="3" y="3" width="2" height="2" fill="#3a2520" opacity="0.6"/><rect x="11" y="5" width="2" height="2" fill="#3a2520" opacity="0.6"/><rect x="7" y="9" width="2" height="2" fill="#3a2520" opacity="0.6"/></svg>`,
   };
   // Explorer character — simple trainer silhouette with 2-frame walk.
@@ -6199,15 +6472,16 @@
     // Shuffle
     emptyCells.sort(() => Math.random() - 0.5);
 
-    // Distribution (of the empty-cell count):
-    // trainers: 25% → 40% (scales with floor)
-    // wild:     15% → 20%
-    // heal+cure: 15% → 5%
-    const trainerCount = Math.max(2, Math.floor(emptyCells.length * (0.25 + 0.15 * difficulty)));
-    const wildCount = Math.max(1, Math.floor(emptyCells.length * (0.15 + 0.05 * difficulty)));
-    const healFullCount = difficulty < 0.5 ? 1 : 0;
-    const healHalfCount = Math.max(1, Math.floor(emptyCells.length * (0.10 - 0.05 * difficulty)));
-    const cureCount = Math.max(1, Math.floor(emptyCells.length * 0.08));
+    // Distribution (of the empty-cell count) — canonical Pyramid has
+    // trainers, wild Pokémon and items only. Healing comes exclusively
+    // from items found during the run (stored in the Combat Bag). No
+    // heal/cure tiles anymore.
+    //   trainers : 28% → 42% (scales with floor)
+    //   wild     : 18% → 22%
+    //   items    : ~15%
+    const trainerCount = Math.max(2, Math.floor(emptyCells.length * (0.28 + 0.14 * difficulty)));
+    const wildCount = Math.max(1, Math.floor(emptyCells.length * (0.18 + 0.04 * difficulty)));
+    const itemCount  = Math.max(1, Math.floor(emptyCells.length * 0.15));
 
     const assign = (type, count) => {
       for (let i = 0; i < count && emptyCells.length; i++) {
@@ -6217,9 +6491,7 @@
     };
     assign(PYR_TILES.TRAINER, trainerCount);
     assign(PYR_TILES.WILD, wildCount);
-    assign(PYR_TILES.HEAL_FULL, healFullCount);
-    assign(PYR_TILES.HEAL_PARTIAL, healHalfCount);
-    assign(PYR_TILES.CURE_STATUS, cureCount);
+    assign(PYR_TILES.ITEM, itemCount);
 
     return {
       grid,
@@ -6353,8 +6625,11 @@
         if (tile === PYR_TILES.EMPTY) { svg = PYR_TILE_SVG.floor; cls += " floor"; }
         else if (tile === PYR_TILES.TRAINER) { svg = PYR_TILE_SVG.trainer; cls += " trainer"; }
         else if (tile === PYR_TILES.WILD) { svg = PYR_TILE_SVG.wild; cls += " wild"; }
-        else if (tile === PYR_TILES.HEAL_FULL || tile === PYR_TILES.HEAL_PARTIAL) { svg = PYR_TILE_SVG.heal; cls += " heal"; }
-        else if (tile === PYR_TILES.CURE_STATUS) { svg = PYR_TILE_SVG.cure; cls += " cure"; }
+        else if (tile === PYR_TILES.ITEM) { svg = PYR_TILE_SVG.item; cls += " item"; }
+        // Legacy tile SVGs for in-flight saves — rendered as plain floor
+        // to avoid stale heal graphics on tiles that no longer heal.
+        else if (tile === PYR_TILES.HEAL_FULL || tile === PYR_TILES.HEAL_PARTIAL
+                 || tile === PYR_TILES.CURE_STATUS) { svg = PYR_TILE_SVG.floor; cls += " floor"; }
       } else {
         // Unrevealed non-wall: floor + ? overlay
         svg = PYR_TILE_SVG.question; cls += " unrevealed";
@@ -6377,12 +6652,31 @@
     const hint = isBossFloor ? t.hintFinal : t.hintStart;
     const hintClass = isBossFloor ? "pyr-hint boss" : "pyr-hint";
 
+    // Theme header + Kinésiste / Combat Bag buttons. The Kinésiste
+    // reveals the next round's theme (and the current one for reference);
+    // the bag button opens a read-only inventory viewer.
+    const currentTheme = pyramidCurrentTheme(run);
+    const themeLabel = lang === "fr" ? currentTheme.labelFr : currentTheme.labelEn;
+    const themeHeaderTxt = lang === "fr"
+      ? `Thème actuel : <strong>${themeLabel}</strong>`
+      : `Current theme: <strong>${themeLabel}</strong>`;
+    pyramidEnsureBag(run);
+    const bagBtnLabel = lang === "fr"
+      ? `🎒 Sac (${pyramidBagCount(run)}/${run.combatBag.cap})`
+      : `🎒 Bag (${pyramidBagCount(run)}/${run.combatBag.cap})`;
+    const kinesisteBtnLabel = lang === "fr" ? "🔮 Kinésiste — Thème ?" : "🔮 Psychic — Theme?";
+
     if (mid) {
       mid.style.display = "block";
       mid.innerHTML = `
+        <div class="frontier-ext-pyr-theme-bar">${themeHeaderTxt}</div>
         ${hpSummary}
         <div class="${hintClass}">${hint}</div>
         ${gridHtml}
+        <div class="frontier-ext-pyr-side-actions">
+          <button class="frontier-ext-action-btn" data-action="pyr-kinesiste-open">${kinesisteBtnLabel}</button>
+          <button class="frontier-ext-action-btn" data-action="pyr-bag-open">${bagBtnLabel}</button>
+        </div>
         <div class="frontier-ext-run-actions">
           <button class="frontier-ext-action-btn danger" data-action="abandon">${t.abandon}</button>
         </div>
@@ -6481,56 +6775,54 @@
 
     switch (tile) {
       case PYR_TILES.TRAINER: {
-        // Consume the tile, fire a trainer combat via launchCombat.
+        // Canonical Gen 3 Pyramid: each trainer brings a SINGLE Pokémon.
+        // We generate normally then slice down to one mon.
         state.grid[state.playerY][state.playerX] = PYR_TILES.EMPTY;
         const trainer = generateTrainer(run.round + 1, facility);
+        trainer.team = (trainer.team || []).slice(0, 1);
         run.upcomingTrainer = trainer;
         run.pyramidEncounterKind = "trainer";
         launchCombat(facility);
         return;
       }
       case PYR_TILES.WILD: {
-        // Single wild Pokémon — simulate by generating a trainer with
-        // only 1 mon in its team. Reuses the existing combat flow.
+        // Single wild Pokémon, species pulled from the CURRENT THEME's
+        // pool (not the facility-wide pool). Theme rotates every series.
         state.grid[state.playerY][state.playerX] = PYR_TILES.EMPTY;
-        const wildTrainer = generateTrainer(run.round + 1, facility);
-        wildTrainer.team = wildTrainer.team.slice(0, 1); // just 1 mon
-        wildTrainer.name = window.gameLang === "fr" ? "Pokémon sauvage" : "Wild Pokémon";
-        wildTrainer.sprite = "hiker"; // any generic sprite, the area will render its own
+        const theme = pyramidCurrentTheme(run);
+        const id = theme.pool[Math.floor(Math.random() * theme.pool.length)];
+        const diff = computeRunDifficulty(run.round + 1, facility);
+        const wildTrainer = {
+          name: window.gameLang === "fr" ? "Pokémon sauvage" : "Wild Pokémon",
+          sprite: "hiker",
+          team: [{ id, moves: pickMovesetFor(id, diff), nature: "" }],
+          isWild: true,
+          facilityId: facility.id,
+          round: run.round + 1,
+          tier: diff.tier,
+          multiplier: diff.mult,
+        };
         run.upcomingTrainer = wildTrainer;
         run.pyramidEncounterKind = "wild";
         launchCombat(facility);
         return;
       }
-      case PYR_TILES.HEAL_FULL: {
+      case PYR_TILES.ITEM: {
+        // Roll a random loot item from the Pyramid item registry, show
+        // the "Prendre" popup, and on confirm push into the Combat Bag
+        // (respecting the 10-distinct-items cap).
         state.grid[state.playerY][state.playerX] = PYR_TILES.EMPTY;
-        applyPikeHealRatio(1.0); // full heal + status cleared
-        showPikeEventModal(facility, "heal", pikeL10n().healFullTitle, pikeL10n().healFullBody, "full");
+        const pick = PYRAMID_ITEMS[Math.floor(Math.random() * PYRAMID_ITEMS.length)];
+        showPyramidItemFoundModal(facility, pick);
         run.pyramidPendingAfterEvent = true;
         return;
       }
-      case PYR_TILES.HEAL_PARTIAL: {
-        state.grid[state.playerY][state.playerX] = PYR_TILES.EMPTY;
-        applyPikeHealRatio(0.5); // partial heal, status stays
-        showPikeEventModal(facility, "heal", pikeL10n().healHalfTitle, pikeL10n().healHalfBody, "half");
-        run.pyramidPendingAfterEvent = true;
-        return;
-      }
+      // Legacy tile types (pre-rework saves). Consume silently + advance.
+      case PYR_TILES.HEAL_FULL:
+      case PYR_TILES.HEAL_PARTIAL:
       case PYR_TILES.CURE_STATUS: {
         state.grid[state.playerY][state.playerX] = PYR_TILES.EMPTY;
-        // Clear status on all slots, HP untouched.
-        if (run.pikeTeam) {
-          for (const sl of ["slot1", "slot2", "slot3"]) {
-            if (run.pikeTeam[sl]) run.pikeTeam[sl].status = null;
-          }
-        }
-        const lang = window.gameLang === "fr" ? "fr" : "en";
-        const title = lang === "fr" ? "🌿 Baie purificatrice" : "🌿 Cleansing berry";
-        const body = lang === "fr"
-          ? "Les statuts de toute ton équipe ont été soignés."
-          : "All status conditions on your team have been cured.";
-        showPikeEventModal(facility, "heal", title, body, "cure");
-        run.pyramidPendingAfterEvent = true;
+        openPyramidFloorMap(facility);
         return;
       }
       case PYR_TILES.STAIRS: {
@@ -6582,13 +6874,346 @@
     openPyramidFloorMap(facility);
   }
 
-  // Called after a non-combat event modal (heal/cure). Player clicks
-  // "Next room" on the event modal → pike-next action fires → we
-  // re-route to the map if it's a Pyramid run.
+  // Called after a non-combat event modal (item found / legacy heal).
+  // Player clicks the "Prendre" / "Next" button → pike-next action
+  // fires → we re-route back to the floor map.
   function pyramidAfterEvent(facility) {
     const run = saved.frontierExt.activeRun;
     if (run) run.pyramidPendingAfterEvent = false;
     openPyramidFloorMap(facility);
+  }
+
+  // ─── Pyramid Combat Bag ──────────────────────────────────────────────
+  // Persistent per-run inventory, capped at PYRAMID_BAG_CAP distinct
+  // item ids. Each entry carries a count so the cap limits variety, not
+  // raw pile size — matches canonical Gen 3 Pyramid rules.
+  function pyramidEnsureBag(run) {
+    if (!run) return null;
+    if (!run.combatBag || typeof run.combatBag !== "object") {
+      run.combatBag = { items: [], cap: PYRAMID_BAG_CAP };
+    }
+    if (typeof run.combatBag.cap !== "number") run.combatBag.cap = PYRAMID_BAG_CAP;
+    if (!Array.isArray(run.combatBag.items)) run.combatBag.items = [];
+    return run.combatBag;
+  }
+  // Try to add one unit of `id` to the bag. Returns true if stored, false
+  // if the bag is at capacity AND the id isn't already represented.
+  function pyramidAddToBag(run, id) {
+    const bag = pyramidEnsureBag(run);
+    const existing = bag.items.find((it) => it.id === id);
+    if (existing) { existing.count = (existing.count || 1) + 1; return true; }
+    if (bag.items.length >= bag.cap) return false;
+    bag.items.push({ id, count: 1 });
+    return true;
+  }
+  function pyramidBagCount(run) {
+    const bag = pyramidEnsureBag(run);
+    return bag.items.reduce((n, it) => n + (it.count || 0), 0);
+  }
+
+  // Canonical Pyramid: no held items allowed at registration. Clear the
+  // `item` field on each slot of the run's pikeTeam snapshot so combat
+  // reads slot.item === null. The snapshot is a copy of the preview team
+  // (initPikeTeamFromPreview), so the player's actual saved preview
+  // team keeps its items untouched — they're restored automatically
+  // because we never wrote back to saved.previewTeams.
+  function stripPyramidHeldItems(run) {
+    if (!run || !run.pikeTeam) return;
+    for (const sl of ["slot1", "slot2", "slot3"]) {
+      if (run.pikeTeam[sl]) run.pikeTeam[sl].item = null;
+    }
+  }
+
+  // Apply an item's immediate effect. Held items are no-ops here — they
+  // just sit in the bag. Returns { applied: bool, slot: "slot1|2|3|null",
+  // message: string } so the caller can surface context to the UI.
+  function applyPyramidItemEffect(run, id) {
+    const def = pyramidItemDef(id);
+    if (!def || !run || !run.pikeTeam) return { applied: false };
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const slots = ["slot1", "slot2", "slot3"];
+    const alive = slots.filter((sl) => {
+      const ps = run.pikeTeam[sl];
+      return ps && (ps.hpRatio || 0) > 0;
+    });
+    const fainted = slots.filter((sl) => {
+      const ps = run.pikeTeam[sl];
+      return ps && (ps.hpRatio || 0) <= 0;
+    });
+
+    if (def.kind === "cure") {
+      // Find the first alive slot that carries the matching status.
+      const target = alive.find((sl) => run.pikeTeam[sl].status === def.cure);
+      if (!target) {
+        return { applied: false, slot: null,
+          message: lang === "fr" ? "Aucun Pokémon n'a ce statut — rangé." : "No Pokémon has that status — stored." };
+      }
+      run.pikeTeam[target].status = null;
+      return { applied: true, slot: target,
+        message: lang === "fr" ? "Statut soigné." : "Status cured." };
+    }
+    if (def.kind === "heal") {
+      const target = alive
+        .slice()
+        .sort((a, b) => (run.pikeTeam[a].hpRatio || 0) - (run.pikeTeam[b].hpRatio || 0))[0];
+      if (!target) return { applied: false, slot: null,
+        message: lang === "fr" ? "Personne à soigner — rangé." : "Nobody to heal — stored." };
+      const ps = run.pikeTeam[target];
+      if ((ps.hpRatio || 0) >= 1) return { applied: false, slot: null,
+        message: lang === "fr" ? "Équipe au max — rangé." : "Team at full HP — stored." };
+      ps.hpRatio = Math.min(1.0, (ps.hpRatio || 0) + (def.ratio || 0.5));
+      return { applied: true, slot: target,
+        message: lang === "fr" ? "PV restaurés." : "HP restored." };
+    }
+    if (def.kind === "heal_full_cure") {
+      // Full heal + status cure on the weakest-% alive slot.
+      const target = alive
+        .slice()
+        .sort((a, b) => (run.pikeTeam[a].hpRatio || 0) - (run.pikeTeam[b].hpRatio || 0))[0];
+      if (!target) return { applied: false, slot: null,
+        message: lang === "fr" ? "Personne à soigner — rangé." : "Nobody to heal — stored." };
+      run.pikeTeam[target].hpRatio = 1.0;
+      run.pikeTeam[target].status = null;
+      return { applied: true, slot: target,
+        message: lang === "fr" ? "Entièrement soigné." : "Fully restored." };
+    }
+    if (def.kind === "revive") {
+      const target = fainted[0];
+      if (!target) return { applied: false, slot: null,
+        message: lang === "fr" ? "Personne à ranimer — rangé." : "Nobody to revive — stored." };
+      run.pikeTeam[target].hpRatio = Math.max(0, Math.min(1, def.ratio || 0.5));
+      run.pikeTeam[target].status = null;
+      return { applied: true, slot: target,
+        message: lang === "fr" ? "Pokémon ranimé." : "Pokémon revived." };
+    }
+    // Held items: no immediate effect.
+    return { applied: true, slot: null,
+      message: lang === "fr" ? "Rangé dans le Sac de Combat." : "Stored in the Combat Bag." };
+  }
+
+  // Item-found modal. Shows the item (label + optional sprite) and a
+  // single "Prendre" button. Taking the item: push to bag + apply effect
+  // if consumable + show a brief flash of the result. Non-takable (bag
+  // full): the button becomes "Laisser" and the item is abandoned.
+  function showPyramidItemFoundModal(facility, itemPick) {
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const run = saved.frontierExt.activeRun;
+    pyramidEnsureBag(run);
+    const top = document.getElementById("tooltipTop");
+    const titleEl = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+    const facName = lang === "fr" ? facility.nameFr : facility.nameEn;
+    const label = pyramidItemLabel(itemPick.id, lang);
+    const spritePath = pyramidItemSprite(itemPick.id);
+    const bagFull = run.combatBag.items.length >= run.combatBag.cap
+      && !run.combatBag.items.some((it) => it.id === itemPick.id);
+
+    const t = lang === "fr"
+      ? {
+          title: `${facName} — Étage ${run.pyramid.floor}/7`,
+          headline: "Tu as trouvé un objet !",
+          take: "Prendre",
+          leave: "Laisser",
+          bagFull: "Sac plein — tu ne peux pas prendre ce nouvel objet.",
+          bagCount: (n, cap) => `Sac : ${n}/${cap}`,
+        }
+      : {
+          title: `${facName} — Floor ${run.pyramid.floor}/7`,
+          headline: "You found an item!",
+          take: "Take",
+          leave: "Leave",
+          bagFull: "Bag full — can't take this new item.",
+          bagCount: (n, cap) => `Bag: ${n}/${cap}`,
+        };
+
+    if (top) top.style.display = "none";
+    if (titleEl) {
+      titleEl.style.display = "block";
+      titleEl.innerHTML = t.title;
+    }
+    if (mid) {
+      mid.style.display = "block";
+      const spriteHtml = spritePath
+        ? `<img src="${spritePath}" alt="${label}" style="width:48px;height:48px;image-rendering:pixelated;">`
+        : `<div class="frontier-ext-pyr-item-placeholder">📦</div>`;
+      mid.innerHTML = `
+        <div class="frontier-ext-pyr-item-found">
+          <div class="headline">${t.headline}</div>
+          <div class="icon">${spriteHtml}</div>
+          <div class="label">${label}</div>
+          <div class="bag-count">${t.bagCount(pyramidBagCount(run), run.combatBag.cap)}</div>
+          ${bagFull ? `<div class="bag-full">${t.bagFull}</div>` : ""}
+        </div>`;
+    }
+    if (bottom) {
+      bottom.style.display = "block";
+      bottom.innerHTML = `
+        <div class="frontier-ext-run-actions">
+          <button class="frontier-ext-action-btn primary" data-action="pyr-take-item" data-item-id="${itemPick.id}">
+            ${bagFull ? `✗ ${t.leave}` : `✓ ${t.take}`}
+          </button>
+        </div>`;
+      bottom.querySelectorAll("[data-action]").forEach((btn) => {
+        btn.onclick = () => handleRunAction(btn.dataset.action, facility);
+      });
+    }
+    if (typeof openTooltip === "function") openTooltip();
+  }
+
+  // Commit the find: push to bag + apply effect (if consumable) + show
+  // a one-shot outcome toast, then route back to the floor map.
+  function takePyramidItem(facility, itemId) {
+    const run = saved.frontierExt.activeRun;
+    if (!run) return;
+    const def = pyramidItemDef(itemId);
+    if (!def) { pyramidAfterEvent(facility); return; }
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+
+    const bag = pyramidEnsureBag(run);
+    const hasRoom = !!bag.items.find((it) => it.id === itemId) || bag.items.length < bag.cap;
+    if (!hasRoom) {
+      // Bag full: just drop the item and advance.
+      pyramidAfterEvent(facility);
+      return;
+    }
+    pyramidAddToBag(run, itemId);
+    let outcome = { applied: true, message: "" };
+    if (def.kind !== "held") {
+      outcome = applyPyramidItemEffect(run, itemId);
+      // If the consumable was applied, remove one unit from the bag
+      // (consumed immediately). Held items stay in the bag.
+      if (outcome.applied) {
+        const entry = bag.items.find((it) => it.id === itemId);
+        if (entry) {
+          entry.count = (entry.count || 1) - 1;
+          if (entry.count <= 0) {
+            bag.items = bag.items.filter((it) => it !== entry);
+          }
+        }
+      }
+    }
+    pyramidAfterEvent(facility);
+  }
+
+  // Kinésiste dialog — reveals the NEXT theme name so the player can
+  // plan before committing to the next round. One-click info modal,
+  // closes back to whatever preview was underneath.
+  function showPyramidKinesisteDialog(facility) {
+    const run = saved.frontierExt.activeRun;
+    if (!run) return;
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const next = pyramidNextTheme(run);
+    const curr = pyramidCurrentTheme(run);
+    const top = document.getElementById("tooltipTop");
+    const titleEl = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+    const facName = lang === "fr" ? facility.nameFr : facility.nameEn;
+    const t = lang === "fr"
+      ? {
+          title: `${facName} — Kinésiste`,
+          intro: "« Je sens les ondes de ta prochaine épreuve… »",
+          currentLabel: "Thème actuel :",
+          nextLabel: "Prochain thème :",
+          back: "Retour",
+        }
+      : {
+          title: `${facName} — Psychic`,
+          intro: "\"I can sense the waves of your next trial…\"",
+          currentLabel: "Current theme:",
+          nextLabel: "Next theme:",
+          back: "Back",
+        };
+
+    if (top) top.style.display = "none";
+    if (titleEl) {
+      titleEl.style.display = "block";
+      titleEl.innerHTML = t.title;
+    }
+    if (mid) {
+      mid.style.display = "block";
+      mid.innerHTML = `
+        <div class="frontier-ext-pyr-kinesiste">
+          <div class="intro">${t.intro}</div>
+          <div class="theme-line">
+            <span class="lbl">${t.currentLabel}</span>
+            <span class="val">${lang === "fr" ? curr.labelFr : curr.labelEn}</span>
+          </div>
+          <div class="theme-line next">
+            <span class="lbl">${t.nextLabel}</span>
+            <span class="val">${lang === "fr" ? next.labelFr : next.labelEn}</span>
+          </div>
+        </div>`;
+    }
+    if (bottom) {
+      bottom.style.display = "block";
+      bottom.innerHTML = `
+        <div class="frontier-ext-run-actions">
+          <button class="frontier-ext-action-btn" data-action="pyr-kinesiste-close">${t.back}</button>
+        </div>`;
+      bottom.querySelectorAll("[data-action]").forEach((btn) => {
+        btn.onclick = () => openPyramidFloorMap(facility);
+      });
+    }
+    if (typeof openTooltip === "function") openTooltip();
+  }
+
+  // Combat Bag viewer — compact list of current items with counts.
+  function showPyramidBagDialog(facility) {
+    const run = saved.frontierExt.activeRun;
+    if (!run) return;
+    pyramidEnsureBag(run);
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const top = document.getElementById("tooltipTop");
+    const titleEl = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+    const facName = lang === "fr" ? facility.nameFr : facility.nameEn;
+    const t = lang === "fr"
+      ? { title: `${facName} — Sac de Combat`,
+          empty: "Ton sac est vide.",
+          cap: (n, c) => `Contenu : ${n}/${c}`, back: "Retour" }
+      : { title: `${facName} — Combat Bag`,
+          empty: "Your bag is empty.",
+          cap: (n, c) => `Contents: ${n}/${c}`, back: "Back" };
+
+    if (top) top.style.display = "none";
+    if (titleEl) {
+      titleEl.style.display = "block";
+      titleEl.innerHTML = t.title;
+    }
+    if (mid) {
+      mid.style.display = "block";
+      const items = run.combatBag.items;
+      const rows = items.length
+        ? items.map((it) => {
+            const def = pyramidItemDef(it.id);
+            const label = def ? (lang === "fr" ? def.labelFr : def.labelEn) : it.id;
+            const sprite = pyramidItemSprite(it.id);
+            const icon = sprite
+              ? `<img src="${sprite}" alt="${label}" style="width:24px;height:24px;image-rendering:pixelated;vertical-align:middle;">`
+              : `<span class="frontier-ext-pyr-bag-icon">📦</span>`;
+            return `<li class="frontier-ext-pyr-bag-row"><span class="icon">${icon}</span><span class="label">${label}</span><span class="count">×${it.count}</span></li>`;
+          }).join("")
+        : `<li class="frontier-ext-pyr-bag-row empty">${t.empty}</li>`;
+      mid.innerHTML = `
+        <div class="frontier-ext-pyr-bag">
+          <div class="cap">${t.cap(pyramidBagCount(run), run.combatBag.cap)}</div>
+          <ul class="frontier-ext-pyr-bag-list">${rows}</ul>
+        </div>`;
+    }
+    if (bottom) {
+      bottom.style.display = "block";
+      bottom.innerHTML = `
+        <div class="frontier-ext-run-actions">
+          <button class="frontier-ext-action-btn" data-action="pyr-bag-close">${t.back}</button>
+        </div>`;
+      bottom.querySelectorAll("[data-action]").forEach((btn) => {
+        btn.onclick = () => openPyramidFloorMap(facility);
+      });
+    }
+    if (typeof openTooltip === "function") openTooltip();
   }
 
   // ─── 6b3. PIKE RULE — 14 rooms, 3 doors, HP/status persist ───────────────
@@ -8540,6 +9165,10 @@
       if (run.pyramidRoundComplete) {
         run.pyramidRoundComplete = false;
         run.pyramid = null; // fresh dungeon next round
+        // Advance the theme index — canonical Pyramid cycles themes per
+        // successful series. The Combat Bag persists across this
+        // transition (pyramidEnsureBag is a no-op if already set).
+        run.pyramidThemeIndex = ((run.pyramidThemeIndex | 0) + 1) % PYRAMID_THEME_COUNT;
         // Fall through to round++ path below.
       } else {
         // Normal dungeon encounter (trainer / wild) — stay in the
