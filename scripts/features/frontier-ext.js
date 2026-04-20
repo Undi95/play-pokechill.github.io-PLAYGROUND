@@ -4756,6 +4756,63 @@
   // Wrap exploreCombatPlayer + exploreCombatWild to count moves, damage
   // and offensive-move shares per side. Identical structure to the Palace
   // hook: pre-orig snapshot, post-orig diff.
+  // ─── ARENA ENEMY-SWAP FREEZE ──────────────────────────────────────────────
+  // Fires whenever a new enemy loads during an Arena run (setWildPkmn wrap).
+  // Goals set by the player: stop the snowball where Pachirisu/Costar/No
+  // Retreat keeps Speed+3+buffs across enemies, and keep players from spam-
+  // attacking DURING the respawn animation before the fresh enemy is at
+  // full HP.
+  //
+  // Two effects per swap:
+  //   1. Strip every stat-up buff from every player slot (atkup1/2, defup,
+  //      satkup, sdefup, speup). Debuffs/status left alone — losing a burn
+  //      because the enemy died would be a silent nerf.
+  //   2. Raise an `arenaSwapFreezing` flag for ARENA_SWAP_FREEZE_MS that
+  //      the existing combat hooks treat identically to `judgeFiring` —
+  //      both exploreCombatPlayer and exploreCombatWild short-circuit
+  //      early, so no attacks land during the load-in window.
+  const ARENA_SWAP_FREEZE_MS = 1200;
+  function installArenaSwapFreeze() {
+    if (typeof window.setWildPkmn !== "function") {
+      setTimeout(installArenaSwapFreeze, 150);
+      return;
+    }
+    if (window.__arenaSwapFreezeHooked) return;
+    window.__arenaSwapFreezeHooked = true;
+    const orig = window.setWildPkmn;
+    window.setWildPkmn = function () {
+      const res = orig.apply(this, arguments);
+      try {
+        if (!isInArenaRun()) return res;
+        const state = arenaGetState();
+        if (!state) return res;
+        // Skip the first setWildPkmn of a combat — that's the initial
+        // enemy load, not a swap. Flag it via `state.initialLoadSeen`.
+        if (!state.initialLoadSeen) {
+          state.initialLoadSeen = true;
+          return res;
+        }
+        // Strip player stat-up buffs on every active + bench slot.
+        const STAT_UP_RE = /^(atk|satk|def|sdef|spe)up[12]$/;
+        if (typeof team !== "undefined") {
+          for (const sl of ["slot1", "slot2", "slot3"]) {
+            if (!team[sl] || !team[sl].buffs) continue;
+            for (const k of Object.keys(team[sl].buffs)) {
+              if (STAT_UP_RE.test(k)) team[sl].buffs[k] = 0;
+            }
+          }
+          if (typeof updateTeamBuffs === "function") {
+            try { updateTeamBuffs(); } catch (e) { /* ignore */ }
+          }
+        }
+        // Freeze combat ticks for the spawn settle window.
+        state.arenaSwapFreezing = true;
+        setTimeout(() => { state.arenaSwapFreezing = false; }, ARENA_SWAP_FREEZE_MS);
+      } catch (e) { console.error("[frontier-ext] arena swap freeze failed:", e); }
+      return res;
+    };
+  }
+
   function installArenaCombatHooks() {
     if (typeof window.exploreCombatPlayer !== "function"
      || typeof window.exploreCombatWild !== "function") {
@@ -4812,7 +4869,7 @@
       // During the verdict pause, freeze combat entirely — skip orig.
       if (arenaActive) {
         const s = arenaGetState();
-        if (s && s.judgeFiring) return;
+        if (s && (s.judgeFiring || s.arenaSwapFreezing)) return;
       }
       let active = null, prevTurn = null, prevWildHp = null;
       if (arenaActive && typeof exploreActiveMember !== "undefined") {
@@ -4850,7 +4907,7 @@
       const arenaActive = isInArenaRun();
       if (arenaActive) {
         const s = arenaGetState();
-        if (s && s.judgeFiring) return;
+        if (s && (s.judgeFiring || s.arenaSwapFreezing)) return;
       }
       let prevWildTurn = null, prevPlayerHp = 0;
       if (arenaActive) {
@@ -8521,6 +8578,7 @@
     installPalaceMoveHook();
     installPalaceEnemyHook();
     installArenaCombatHooks();
+    installArenaSwapFreeze();
     installTeamSanitizerHooks();
     installDomeTeamFilter();
     installPikeHpRestoreHook();
