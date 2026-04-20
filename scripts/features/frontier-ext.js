@@ -10049,6 +10049,22 @@
         // successful series. The Combat Bag persists across this
         // transition (pyramidEnsureBag is a no-op if already set).
         run.pyramidThemeIndex = ((run.pyramidThemeIndex | 0) + 1) % PYRAMID_THEME_COUNT;
+        // Canonical rule: "les objets tenus par vos Pokémon sont
+        // automatiquement rangés dans le Sac de Combat" — at round end,
+        // every equipped held item comes off the Pokémon. In our bag
+        // model the items never left the bag (held-in-bag invariant),
+        // so the "return" is just unequipping: clear pikeTeam[sl].item
+        // + wipe the preview mirror so the locked-team UI and the
+        // registration check both see an itemless team for the next
+        // series. Player can re-equip from the bag before continuing.
+        if (run.pikeTeam) {
+          for (const sl of ["slot1", "slot2", "slot3"]) {
+            if (run.pikeTeam[sl] && run.pikeTeam[sl].item) {
+              mirrorPyramidItemToPreview(sl, null);
+              run.pikeTeam[sl].item = null;
+            }
+          }
+        }
         // Fall through to round++ path below.
       } else {
         // Normal dungeon encounter (trainer / wild) — stay in the
