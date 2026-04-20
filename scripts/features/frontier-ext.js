@@ -4171,71 +4171,18 @@
     if (title) {
       title.style.display = "block";
       title.innerHTML = lang === "fr"
-        ? "⚔️ ZdC d'Hoenn — Règles"
-        : "⚔️ Hoenn Battle Frontier — Rules";
+        ? "⚔️ Zone de Combat — Hoenn"
+        : "⚔️ Battle Frontier — Hoenn";
     }
     if (mid) {
       mid.style.display = "block";
-      const body = lang === "fr" ? [
-        ["Règles canoniques Gen 3", [
-          "Pokémon niveau 100 requis.",
-          "Équipes de 3 Pokémon par série.",
-          "Aucune restriction de division (S, SS, SSS autorisés).",
-          "Chaque facility applique ses propres règles (Usine = locations, Pic = 14 salles à portes, Pyramide = 7 étages, etc.).",
-        ]],
-        ["Série / Repos / Reprise", [
-          "Commencer une série verrouille ton équipe et bloque les autres facilities ZdC — une série active à la fois.",
-          "À la fin de chaque round tu as trois choix : Continuer, Repos, ou Abandonner.",
-          "« Repos » met la facility en pause : équipe déverrouillée, tu peux jouer ailleurs, relancer une série dans une autre facility. Autant de pauses que de facilities, toutes coexistent.",
-          "« Reprendre » depuis la tuile réactive le mode frontier sur la série mise en pause.",
-          "Fermer le jeu (F5, changement de langue, reload) pendant une série active = défaite, série remise à 0. Les séries en pause survivent.",
-        ]],
-        ["Cerveaux de Zone et multiplicateur", [
-          "Chaque facility a ses rounds Argent et Or — c'est à ces rounds que tu affrontes le Meneur/Meneuse de Zone.",
-          "Après l'Or, il revient pour des revanches post-Gold avec un multiplicateur ×2, ×3, etc. Les stats ennemies montent à chaque palier.",
-          "Le 7e combat d'un round non-boss est un « Gardien de round » — statistiques boostées, talent caché.",
-        ]],
-        ["Ennemis : IV, talents, capacités", [
-          "Les IV ennemis grimpent linéairement de 0 à 6 entre le round 1 et le round Or, puis restent au max.",
-          "Talents cachés forcés au round Or et sur toutes les revanches.",
-          "Capacités signatures et egg moves injectés automatiquement côté ennemi à partir du round Argent.",
-          "Chaque Meneur/Meneuse a une équipe Argent et une équipe Or canoniques.",
-        ]],
-      ] : [
-        ["Canonical Gen 3 rules", [
-          "Pokémon level 100 required.",
-          "Teams of 3 Pokémon per run.",
-          "No division restrictions (S, SS, SSS all allowed).",
-          "Each facility applies its own ruleset (Factory = rentals, Pike = 14 rooms with doors, Pyramid = 7-floor dungeon, etc.).",
-        ]],
-        ["Run / Rest / Resume", [
-          "Starting a run locks your team and blocks the other Hoenn facilities — one active run at a time.",
-          "At the end of each round you get three choices: Continue, Rest, or Abandon.",
-          "Rest puts the facility on pause: team unlocked, you can play elsewhere, start another run in another facility. All pauses coexist.",
-          "Resume from the tile reactivates frontier mode on the paused run.",
-          "Closing the game (F5, language toggle, reload) during an ACTIVE run counts as defeat — streak goes to 0. Paused runs survive.",
-        ]],
-        ["Zone Leaders and multiplier", [
-          "Each facility has its own Silver and Gold rounds where you face the Zone Leader.",
-          "After Gold, they return with post-Gold rematches at multiplier ×2, ×3, etc. Enemy stats scale at every tier.",
-          "The 7th battle of a non-boss round is a \"round guardian\" — boosted stats, hidden ability.",
-        ]],
-        ["Enemy IVs, abilities, moves", [
-          "Enemy IVs ramp linearly from 0 to 6 between round 1 and the Gold round, then stay maxed.",
-          "Hidden abilities forced at Gold and on every rematch.",
-          "Signature and egg moves injected on the enemy side starting at Silver.",
-          "Each Zone Leader has canonical Silver and Gold teams.",
-        ]],
-      ];
-      const blocks = body.map(([heading, items]) => {
-        const list = items.map((txt) => `<li style="margin:0.15rem 0;">${txt}</li>`).join("");
-        return `
-          <div style="padding:0.3rem 0.8rem;">
-            <div style="font-weight:bold;color:var(--dark1,#2a1a0a);margin-bottom:0.2rem;">${heading}</div>
-            <ul style="padding-left:1.1rem;margin:0.1rem 0 0.4rem;">${list}</ul>
-          </div>`;
-      }).join("");
-      mid.innerHTML = blocks;
+      // Condensed 3-line blurb matching the vanilla VS Zone de Combat
+      // tooltip density — one paragraph, centered, beige background
+      // inherited from the tooltipMid base style.
+      const body = lang === "fr"
+        ? "Règles Gen 3 d'Émeraude : équipes de 3 Pokémon niveau 100, sans restriction de division. Sept facilities aux règles uniques, chacune avec son Meneur ou Meneuse de Zone (symboles Argent &amp; Or, puis revanches post-Or au multiplicateur croissant). « Repos » met une série en pause sans casser le streak ; fermer le jeu pendant une série active compte comme défaite."
+        : "Gen 3 Emerald rules: teams of 3 level-100 Pokémon, no division restrictions. Seven facilities each with their own rules and Zone Leader (Silver &amp; Gold symbols, then escalating post-Gold rematches). Rest pauses a run without losing the streak; closing the game mid-active-run counts as defeat.";
+      mid.innerHTML = `<div style="padding:0.6rem 0.9rem; text-align:center; font-weight:bold; line-height:1.45;">${body}</div>`;
     }
   }
 
