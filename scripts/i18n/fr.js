@@ -1122,6 +1122,27 @@ window.UI_TEXT_MAP = UI_TEXT_MAP;
 
 // --- UI_PARTIALS & translateRuntimeText ---
 window.i18n.fr.UI_PARTIALS = [
+  // ── Restricted moves modal (teams.js:355 / explore.js:9300) ────────────
+  // Le message est composé au runtime via innerHTML qui intercale une icône
+  // SVG au milieu du texte :
+  //   `...multiple restricted moves (${restrictedIcon}) equipped`
+  // La table UI_TEXT_MAP en tête de fichier contient la phrase avec un
+  // placeholder `{icon}`, mais l'engine i18n fait du matching exact sur les
+  // nodes de texte — qui sont splittés autour du SVG. Chaque fragment est
+  // donc traduit séparément ici.
+  [
+    "One or more Pokemon in the current team have multiple restricted moves (",
+    "Un ou plusieurs Pokémon de l'équipe actuelle ont plusieurs capacités restreintes (",
+  ],
+  [
+    "The training Pokemon has multiple restricted moves (",
+    "Le Pokémon d'entraînement a plusieurs capacités restreintes (",
+  ],
+  // Suffixes. Plus long avant plus court — sinon ") equipped" matche
+  // d'abord et mange l'exclamation.
+  [") equipped!", ") équipées !"],
+  [") equipped", ") équipées"],
+
   ["Litten", "Flamiaou"],
   ["Turtwig", "Tortipouss"],
   ["Froakie", "Grenousse"],
@@ -1329,17 +1350,26 @@ window.i18n.fr.GAME_UI = {
     betterStatMoves:
       "Get better moves that correctly match your stat distribution (Physical/Special)",
     betterTypeMoves: "Get better type-matching moves",
-    buffAtk: "SPE ▼▼",
-    buffBrn: "SPE ▼▼",
-    buffCnf: "SPE ▼▼",
-    buffDef: "SPE ▼▼",
-    buffEmb: "SPE ▼▼",
-    buffFrz: "SPE ▼▼",
-    buffPar: "SPE ▼▼",
-    buffPsn: "SPE ▼▼",
+    // Buff abréviations — valeurs EN restaurées d'après formatBuffs()
+    // dans explore.js (ligne ~7835). Le bloc précédent avait tous les
+    // statuts mappés à "SPE ▼▼" (corruption d'un find/replace précédent),
+    // ce qui cassait toute introspection EN-source du lang toggle.
+    buffAtk: "ATK",
+    buffBrn: "BRN",
+    buffCnf: "CNF",
+    buffDef: "DEF",
+    buffEmb: "EMB",
+    buffFrz: "FRZ",
+    buffPar: "PAR",
+    buffPsn: "PSN",
     buffSatk: "SATK",
     buffSdef: "SDEF",
     buffSpe: "SPE",
+    // buffZzz : la clé est mal nommée historiquement — UI_TEXT_MAP
+    // (ligne 942) mappe "SPE ▼▼" → buffZzz, donc la source EN reste
+    // "SPE ▼▼" et la traduction FR est "VIT ▼▼". Le vrai ZZZ du sommeil
+    // est rendu directement par explore.js:7873 (formatBuffs) sans
+    // passer par le pipeline i18n — il ne faut pas y toucher.
     buffZzz: "SPE ▼▼",
     canBeBoughtInPokeMart: "<span>Can be bought in the Poke-Mart</span>",
     canBeDroppedDungeonArea:
