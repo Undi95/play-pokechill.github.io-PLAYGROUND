@@ -4503,6 +4503,10 @@
         try { restoreEnemyRuntimeStats(doomedRun); } catch (e) { /* ignore */ }
         if (isPyramidFacility(facility)) {
           try { setPyramidModalSizing(false); } catch (e) { /* ignore */ }
+          // Strip any Pyramid-mirrored held items from the preview team
+          // before activeRun is nulled below, so the player's preview
+          // slot returns to its pre-run itemless state.
+          try { cleanupPyramidPreviewItems(doomedRun); } catch (e) { /* ignore */ }
           doomedRun.pyramid = null;
         }
       }
@@ -7265,10 +7269,51 @@
   // d'objets à l'inscription."
   function currentPreviewHasHeldItems() {
     const pt = (saved && saved.previewTeams && saved.previewTeams[saved.currentPreviewTeam]) || {};
+    // Pyramid-equipped items are mirrored into the preview (so the
+    // locked team-menu UI actually shows the icons), so they'd trip
+    // this check at between-round Continue. Exempt any item that
+    // matches the active run's pikeTeam equipment for that slot.
+    const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
+    const pikeByslot = (run && run.pikeTeam) ? run.pikeTeam : null;
     for (const sl of ["slot1", "slot2", "slot3"]) {
-      if (pt[sl] && pt[sl].pkmn && pt[sl].item) return true;
+      if (!pt[sl] || !pt[sl].pkmn || !pt[sl].item) continue;
+      const pyramidItem = pikeByslot && pikeByslot[sl] ? pikeByslot[sl].item : null;
+      if (pyramidItem && pt[sl].item === pyramidItem) continue; // our own mirror
+      return true;
     }
     return false;
+  }
+
+  // Mirror (or clear) a Pyramid equipped item into the tied preview
+  // team's slot. `itemId` null clears the slot. Called by the equip
+  // flow so the locked team-menu UI actually shows the held-item icon
+  // (it reads from saved.previewTeams). The mirror is transient —
+  // cleanupPyramidPreviewItems wipes it when the run ends.
+  function mirrorPyramidItemToPreview(slotKey, itemId) {
+    try {
+      const run = saved && saved.frontierExt && saved.frontierExt.activeRun;
+      if (!run) return;
+      const slot = run.tiedPreviewSlot || saved.currentPreviewTeam;
+      const pt = saved.previewTeams && saved.previewTeams[slot];
+      if (!pt || !pt[slotKey]) return;
+      pt[slotKey].item = itemId || undefined;
+    } catch (e) { /* ignore */ }
+  }
+  // Run-end cleanup: clear every preview slot's item where the value
+  // matches what the pyramid had equipped. Keeps any legitimate
+  // pre-existing items untouched (shouldn't exist per the entry block,
+  // but belt + braces).
+  function cleanupPyramidPreviewItems(run) {
+    try {
+      if (!run) return;
+      const slot = run.tiedPreviewSlot;
+      const pt = saved && saved.previewTeams && saved.previewTeams[slot];
+      if (!pt || !run.pikeTeam) return;
+      for (const sl of ["slot1", "slot2", "slot3"]) {
+        const eq = run.pikeTeam[sl] && run.pikeTeam[sl].item;
+        if (eq && pt[sl] && pt[sl].item === eq) pt[sl].item = undefined;
+      }
+    } catch (e) { /* ignore */ }
   }
   function showPyramidItemsError(facility) {
     const lang = window.gameLang === "fr" ? "fr" : "en";
@@ -7894,7 +7939,10 @@
       });
       mid.querySelectorAll("[data-pyr-equip-unequip]").forEach((btn) => {
         btn.onclick = () => {
-          if (currentlyOn) run.pikeTeam[currentlyOn].item = null;
+          if (currentlyOn) {
+            run.pikeTeam[currentlyOn].item = null;
+            mirrorPyramidItemToPreview(currentlyOn, null);
+          }
           showPyramidBagDialog(facility);
         };
       });
@@ -7927,8 +7975,10 @@
     const previouslyOn = pyramidEquippedSlot(run, itemId);
     if (previouslyOn && previouslyOn !== slotKey) {
       run.pikeTeam[previouslyOn].item = null;
+      mirrorPyramidItemToPreview(previouslyOn, null);
     }
     run.pikeTeam[slotKey].item = itemId;
+    mirrorPyramidItemToPreview(slotKey, itemId);
     return true;
   }
 
@@ -10058,6 +10108,7 @@
     try { restoreEnemyRuntimeStats(run); } catch (e) { /* ignore */ }
     if (isPyramidFacility(fac)) {
       try { setPyramidModalSizing(false); } catch (e) { /* ignore */ }
+      try { cleanupPyramidPreviewItems(run); } catch (e) { /* ignore */ }
     }
     saved.frontierExt.activeRun = null;
     saved.frontierExt.streaks[run.facilityId] = 0;
