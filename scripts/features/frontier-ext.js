@@ -2498,6 +2498,81 @@
       .frontier-ext-pyr-bag-row .icon { text-align: center; }
       .frontier-ext-pyr-bag-row .count { opacity: 0.8; font-weight: bold; }
       .frontier-ext-pyr-bag-row.empty { text-align: center; opacity: 0.6; grid-template-columns: 1fr; }
+      .frontier-ext-pyr-bag-row .frontier-ext-action-btn.small {
+        padding: 0.2rem 0.5rem;
+        font-size: 0.75rem;
+      }
+      .frontier-ext-pyr-bag-row .held-pill {
+        font-size: 0.72rem;
+        opacity: 0.6;
+        font-style: italic;
+        padding: 0.1rem 0.35rem;
+      }
+      /* Layout adjustment: when a use-button (or held-pill) is present,
+         the row grows to 4 columns. */
+      .frontier-ext-pyr-bag-row { grid-template-columns: 2rem 1fr auto auto; }
+      /* Items-held error modal (Pyramid registration refusal). */
+      .frontier-ext-pyr-items-error {
+        padding: 0.8rem;
+        text-align: center;
+        color: #ffcccc;
+        font-size: 0.9rem;
+        line-height: 1.4;
+      }
+      /* Target picker for "Utiliser" consumables. 3-card row of slot
+         buttons; disabled cards dim + cursor not-allowed. */
+      .frontier-ext-pyr-use-picker {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0.4rem;
+        padding: 0.6rem 0.6rem 0.3rem;
+      }
+      .frontier-ext-pyr-target-card {
+        background: linear-gradient(180deg, #3a2a1a 0%, #22160c 100%);
+        color: #f2d999;
+        border: 1px solid rgba(255, 210, 130, 0.35);
+        border-radius: 0.4rem;
+        padding: 0.5rem 0.4rem;
+        font-size: 0.82rem;
+        text-align: center;
+        cursor: pointer;
+        transition: background 0.15s, transform 0.1s, border-color 0.15s;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.15rem;
+      }
+      .frontier-ext-pyr-target-card:hover:not([disabled]) {
+        background: linear-gradient(180deg, #4a3620 0%, #2c1c10 100%);
+        border-color: rgba(255, 210, 130, 0.7);
+      }
+      .frontier-ext-pyr-target-card:active:not([disabled]) { transform: translateY(1px); }
+      .frontier-ext-pyr-target-card.invalid,
+      .frontier-ext-pyr-target-card[disabled] {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .frontier-ext-pyr-target-card .name { font-weight: bold; color: #fff; }
+      .frontier-ext-pyr-target-card .hp { opacity: 0.9; }
+      .frontier-ext-pyr-target-card .status {
+        display: inline-block;
+        background: rgba(180, 80, 180, 0.6);
+        padding: 0.05rem 0.35rem;
+        border-radius: 0.2rem;
+        font-size: 0.7rem;
+      }
+      .frontier-ext-pyr-target-card .invalid-label {
+        font-size: 0.7rem;
+        font-style: italic;
+        opacity: 0.7;
+      }
+      .frontier-ext-pyr-use-picker .no-target {
+        grid-column: 1 / -1;
+        text-align: center;
+        opacity: 0.7;
+        font-style: italic;
+        padding: 0.4rem;
+      }
       /* Pyramid modal gets the same size override as Factory. */
       #tooltipBox.frontier-ext-pyramid-open {
         max-height: 92vh !important;
@@ -4185,6 +4260,13 @@
         showTeamSizeError(facility);
         return;
       }
+      // Pyramid-specific hard gate: the reception NPC refuses entry if
+      // any registered Pokémon is holding an item. Surface a clear
+      // error modal instead of silently stripping items.
+      if (isPyramidFacility(facility) && currentPreviewHasHeldItems()) {
+        showPyramidItemsError(facility);
+        return;
+      }
       saved.frontierExt.activeRun = {
         facilityId: facility.id,
         round: 0,
@@ -4220,11 +4302,6 @@
       if (isPyramidFacility(facility)) {
         initPikeTeamFromPreview();
         const newRun = saved.frontierExt.activeRun;
-        // Canonical rule: Pokémon registered for the Pyramid cannot hold
-        // items at entry. Strip held items from the run's pikeTeam copy
-        // so combat sees item=null; the player's preview team is left
-        // untouched (items live in saved.previewTeams, not on the copy).
-        stripPyramidHeldItems(newRun);
         // Init theme index + Combat Bag. The theme index only advances
         // on successful round clears; losing a run nulls activeRun and
         // the next start therefore begins at theme 0 — matches the
@@ -4245,6 +4322,13 @@
       // back into a sub-flow that would only block at the inner launch.
       if (!isFactoryFacility(facility) && currentPreviewTeamSize() !== 3) {
         showTeamSizeError(facility);
+        return;
+      }
+      // Pyramid-specific: still no items between rounds. If the player
+      // re-equipped during the round-cleared break, force them to
+      // unequip before continuing.
+      if (isPyramidFacility(facility) && currentPreviewHasHeldItems()) {
+        showPyramidItemsError(facility);
         return;
       }
       // Re-tie the run to the currently-selected preview slot. Between
@@ -6819,7 +6903,9 @@
     switch (tile) {
       case PYR_TILES.TRAINER: {
         // Canonical Gen 3 Pyramid: each trainer brings a SINGLE Pokémon.
-        // We generate normally then slice down to one mon.
+        // Trainers DO NOT follow the theme (confirmed by user); only
+        // wild tiles are theme-filtered. We generate normally then
+        // slice the team down to one mon.
         state.grid[state.playerY][state.playerX] = PYR_TILES.EMPTY;
         const trainer = generateTrainer(run.round + 1, facility);
         trainer.team = (trainer.team || []).slice(0, 1);
@@ -6998,17 +7084,48 @@
     moveset[0] = chosen;
   }
 
-  // Canonical Pyramid: no held items allowed at registration. Clear the
-  // `item` field on each slot of the run's pikeTeam snapshot so combat
-  // reads slot.item === null. The snapshot is a copy of the preview team
-  // (initPikeTeamFromPreview), so the player's actual saved preview
-  // team keeps its items untouched — they're restored automatically
-  // because we never wrote back to saved.previewTeams.
-  function stripPyramidHeldItems(run) {
-    if (!run || !run.pikeTeam) return;
+  // Canonical Pyramid: no held items allowed at registration. Instead
+  // of silently stripping (previous behaviour), we surface a hard error
+  // to the player so they know they need to unequip manually — matches
+  // the Emerald reception NPC wording "vos Pokémon ne doivent pas tenir
+  // d'objets à l'inscription."
+  function currentPreviewHasHeldItems() {
+    const pt = (saved && saved.previewTeams && saved.previewTeams[saved.currentPreviewTeam]) || {};
     for (const sl of ["slot1", "slot2", "slot3"]) {
-      if (run.pikeTeam[sl]) run.pikeTeam[sl].item = null;
+      if (pt[sl] && pt[sl].pkmn && pt[sl].item) return true;
     }
+    return false;
+  }
+  function showPyramidItemsError(facility) {
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const t = lang === "fr"
+      ? { title: "Inscription refusée",
+          body: "Aucun de tes Pokémon ne doit tenir d'objet pour entrer dans la Pyramide. Retire les objets puis réessaye.",
+          back: "Compris" }
+      : { title: "Registration refused",
+          body: "None of your Pokémon may hold an item when entering the Pyramid. Unequip all items and try again.",
+          back: "OK" };
+    const top = document.getElementById("tooltipTop");
+    const titleEl = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+    if (top) top.style.display = "none";
+    if (titleEl) { titleEl.style.display = "block"; titleEl.innerHTML = t.title; }
+    if (mid) {
+      mid.style.display = "block";
+      mid.innerHTML = `<div class="frontier-ext-pyr-items-error">⚠️ ${t.body}</div>`;
+    }
+    if (bottom) {
+      bottom.style.display = "block";
+      bottom.innerHTML = `
+        <div class="frontier-ext-run-actions">
+          <button class="frontier-ext-action-btn primary" data-action="pyr-items-error-close">${t.back}</button>
+        </div>`;
+      bottom.querySelectorAll("[data-action]").forEach((btn) => {
+        btn.onclick = () => openFacilityPreview(facility);
+      });
+    }
+    if (typeof openTooltip === "function") openTooltip();
   }
 
   // Apply an item's immediate effect. Held items are no-ops here — they
@@ -7148,39 +7265,72 @@
     if (typeof openTooltip === "function") openTooltip();
   }
 
-  // Commit the find: push to bag + apply effect (if consumable) + show
-  // a one-shot outcome toast, then route back to the floor map.
+  // Commit the find: push to bag (ALL items — consumables and held
+  // alike — go straight into the Combat Bag). No auto-apply: the
+  // player opens the bag later to use a consumable on a specific
+  // Pokémon, which matches canonical Gen 3 Pyramid bag semantics.
   function takePyramidItem(facility, itemId) {
     const run = saved.frontierExt.activeRun;
     if (!run) return;
     const def = pyramidItemDef(itemId);
     if (!def) { pyramidAfterEvent(facility); return; }
-    const lang = window.gameLang === "fr" ? "fr" : "en";
-
     const bag = pyramidEnsureBag(run);
     const hasRoom = !!bag.items.find((it) => it.id === itemId) || bag.items.length < bag.cap;
     if (!hasRoom) {
-      // Bag full: just drop the item and advance.
+      // Bag full: drop the item and advance with no effect.
       pyramidAfterEvent(facility);
       return;
     }
     pyramidAddToBag(run, itemId);
-    let outcome = { applied: true, message: "" };
-    if (def.kind !== "held") {
-      outcome = applyPyramidItemEffect(run, itemId);
-      // If the consumable was applied, remove one unit from the bag
-      // (consumed immediately). Held items stay in the bag.
-      if (outcome.applied) {
-        const entry = bag.items.find((it) => it.id === itemId);
-        if (entry) {
-          entry.count = (entry.count || 1) - 1;
-          if (entry.count <= 0) {
-            bag.items = bag.items.filter((it) => it !== entry);
-          }
-        }
-      }
-    }
     pyramidAfterEvent(facility);
+  }
+
+  // Remove one unit of `id` from the bag. If the entry's count drops
+  // to 0, the entry itself is removed (freeing a slot under the cap).
+  function pyramidConsumeFromBag(run, id) {
+    const bag = pyramidEnsureBag(run);
+    const entry = bag.items.find((it) => it.id === id);
+    if (!entry) return false;
+    entry.count = (entry.count || 1) - 1;
+    if (entry.count <= 0) bag.items = bag.items.filter((it) => it !== entry);
+    return true;
+  }
+
+  // Apply a consumable effect to a SPECIFIC slot (user-picked from the
+  // bag UI). Returns true if the effect took (bag unit consumed), false
+  // if the target is invalid for the item (e.g. revive on an alive mon).
+  function applyPyramidItemEffectTo(run, id, slotKey) {
+    const def = pyramidItemDef(id);
+    if (!def || !run || !run.pikeTeam) return false;
+    const ps = run.pikeTeam[slotKey];
+    if (!ps || !ps.pkmnId) return false;
+
+    if (def.kind === "cure") {
+      if (ps.status !== def.cure) return false;
+      ps.status = null;
+      return true;
+    }
+    if (def.kind === "heal") {
+      if ((ps.hpRatio || 0) <= 0) return false;           // fainted — need revive
+      if ((ps.hpRatio || 0) >= 1) return false;           // already full
+      ps.hpRatio = Math.min(1.0, (ps.hpRatio || 0) + (def.ratio || 0.5));
+      return true;
+    }
+    if (def.kind === "heal_full_cure") {
+      if ((ps.hpRatio || 0) <= 0) return false;
+      ps.hpRatio = 1.0;
+      ps.status = null;
+      return true;
+    }
+    if (def.kind === "revive") {
+      if ((ps.hpRatio || 0) > 0) return false;
+      ps.hpRatio = Math.max(0, Math.min(1, def.ratio || 0.5));
+      ps.status = null;
+      return true;
+    }
+    // Held items: not usable from the bag — must be equipped via the
+    // (future) equip UI. Returning false here leaves the item in place.
+    return false;
   }
 
   // Kinésiste dialog — reveals the NEXT theme name so the player can
@@ -7246,7 +7396,9 @@
     if (typeof openTooltip === "function") openTooltip();
   }
 
-  // Combat Bag viewer — compact list of current items with counts.
+  // Combat Bag viewer — each row shows item + count + (for consumables)
+  // a "Utiliser" button that opens a Pokémon-target picker. Held items
+  // are greyed out with a "tenu" placeholder until the equip UI ships.
   function showPyramidBagDialog(facility) {
     const run = saved.frontierExt.activeRun;
     if (!run) return;
@@ -7260,10 +7412,16 @@
     const t = lang === "fr"
       ? { title: `${facName} — Sac de Combat`,
           empty: "Ton sac est vide.",
-          cap: (n, c) => `Contenu : ${n}/${c}`, back: "Retour" }
+          cap: (n, c) => `Contenu : ${n}/${c}`,
+          back: "Retour",
+          use: "Utiliser",
+          held: "À équiper" }
       : { title: `${facName} — Combat Bag`,
           empty: "Your bag is empty.",
-          cap: (n, c) => `Contents: ${n}/${c}`, back: "Back" };
+          cap: (n, c) => `Contents: ${n}/${c}`,
+          back: "Back",
+          use: "Use",
+          held: "To equip" };
 
     if (top) top.style.display = "none";
     if (titleEl) {
@@ -7281,7 +7439,10 @@
             const icon = sprite
               ? `<img src="${sprite}" alt="${label}" style="width:24px;height:24px;image-rendering:pixelated;vertical-align:middle;">`
               : `<span class="frontier-ext-pyr-bag-icon">📦</span>`;
-            return `<li class="frontier-ext-pyr-bag-row"><span class="icon">${icon}</span><span class="label">${label}</span><span class="count">×${it.count}</span></li>`;
+            const actionBtn = (def && def.kind === "held")
+              ? `<span class="held-pill">${t.held}</span>`
+              : `<button class="frontier-ext-action-btn small" data-pyr-use="${it.id}">${t.use}</button>`;
+            return `<li class="frontier-ext-pyr-bag-row"><span class="icon">${icon}</span><span class="label">${label}</span><span class="count">×${it.count}</span>${actionBtn}</li>`;
           }).join("")
         : `<li class="frontier-ext-pyr-bag-row empty">${t.empty}</li>`;
       mid.innerHTML = `
@@ -7289,6 +7450,9 @@
           <div class="cap">${t.cap(pyramidBagCount(run), run.combatBag.cap)}</div>
           <ul class="frontier-ext-pyr-bag-list">${rows}</ul>
         </div>`;
+      mid.querySelectorAll("[data-pyr-use]").forEach((btn) => {
+        btn.onclick = () => showPyramidUseTargetPicker(facility, btn.dataset.pyrUse);
+      });
     }
     if (bottom) {
       bottom.style.display = "block";
@@ -7298,6 +7462,95 @@
         </div>`;
       bottom.querySelectorAll("[data-action]").forEach((btn) => {
         btn.onclick = () => openPyramidFloorMap(facility);
+      });
+    }
+    if (typeof openTooltip === "function") openTooltip();
+  }
+
+  // Pick a team slot as the target for a consumable item. Each slot is
+  // a clickable card showing HP% + current status. Only slots for which
+  // the effect is applicable stay enabled (e.g. revive → fainted only,
+  // heal → alive + not full, cure → has matching status).
+  function showPyramidUseTargetPicker(facility, itemId) {
+    const run = saved.frontierExt.activeRun;
+    if (!run || !run.pikeTeam) return;
+    const def = pyramidItemDef(itemId);
+    if (!def) { showPyramidBagDialog(facility); return; }
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const title = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+    const itemLabel = lang === "fr" ? def.labelFr : def.labelEn;
+    const t = lang === "fr"
+      ? { title: `Utiliser ${itemLabel} sur…`,
+          back: "Annuler",
+          invalid: "non applicable",
+          noTarget: "Aucun Pokémon valide pour cet objet." }
+      : { title: `Use ${itemLabel} on…`,
+          back: "Cancel",
+          invalid: "not applicable",
+          noTarget: "No valid target for this item." };
+
+    const isValidFor = (sl) => {
+      const ps = run.pikeTeam[sl];
+      if (!ps || !ps.pkmnId) return false;
+      if (def.kind === "cure")         return ps.status === def.cure;
+      if (def.kind === "heal")         return (ps.hpRatio || 0) > 0 && (ps.hpRatio || 0) < 1;
+      if (def.kind === "heal_full_cure") return (ps.hpRatio || 0) > 0 && ((ps.hpRatio || 0) < 1 || !!ps.status);
+      if (def.kind === "revive")       return (ps.hpRatio || 0) <= 0;
+      return false;
+    };
+
+    if (title) { title.style.display = "block"; title.innerHTML = t.title; }
+    if (mid) {
+      mid.style.display = "block";
+      const statusLabel = {
+        poisoned: lang === "fr" ? "Empoisonné" : "Poisoned",
+        burn:     lang === "fr" ? "Brûlé"      : "Burned",
+        paralysis:lang === "fr" ? "Paralysé"   : "Paralyzed",
+        sleep:    lang === "fr" ? "Endormi"    : "Asleep",
+        freeze:   lang === "fr" ? "Gelé"       : "Frozen",
+        confused: lang === "fr" ? "Confus"     : "Confused",
+      };
+      const anyValid = ["slot1", "slot2", "slot3"].some(isValidFor);
+      const cards = ["slot1", "slot2", "slot3"].map((sl) => {
+        const ps = run.pikeTeam[sl];
+        if (!ps || !ps.pkmnId) return "";
+        const monName = typeof format === "function" ? format(ps.pkmnId) : ps.pkmnId;
+        const pct = Math.round((ps.hpRatio || 0) * 100);
+        const statusPill = ps.status ? `<span class="status">${statusLabel[ps.status] || ps.status}</span>` : "";
+        const valid = isValidFor(sl);
+        return `
+          <button class="frontier-ext-pyr-target-card ${valid ? "" : "invalid"}"
+                  data-pyr-use-target="${sl}" ${valid ? "" : "disabled"}>
+            <div class="name">${monName}</div>
+            <div class="hp">${(ps.hpRatio || 0) <= 0 ? "K.O." : `${pct}%`}</div>
+            ${statusPill}
+            ${valid ? "" : `<div class="invalid-label">(${t.invalid})</div>`}
+          </button>`;
+      }).join("");
+      mid.innerHTML = `
+        <div class="frontier-ext-pyr-use-picker">
+          ${cards}
+          ${!anyValid ? `<div class="no-target">${t.noTarget}</div>` : ""}
+        </div>`;
+      mid.querySelectorAll("[data-pyr-use-target]").forEach((card) => {
+        card.onclick = () => {
+          const slot = card.dataset.pyrUseTarget;
+          const ok = applyPyramidItemEffectTo(run, itemId, slot);
+          if (ok) pyramidConsumeFromBag(run, itemId);
+          showPyramidBagDialog(facility);
+        };
+      });
+    }
+    if (bottom) {
+      bottom.style.display = "block";
+      bottom.innerHTML = `
+        <div class="frontier-ext-run-actions">
+          <button class="frontier-ext-action-btn" data-pyr-use-cancel="1">${t.back}</button>
+        </div>`;
+      bottom.querySelectorAll("[data-pyr-use-cancel]").forEach((btn) => {
+        btn.onclick = () => showPyramidBagDialog(facility);
       });
     }
     if (typeof openTooltip === "function") openTooltip();
