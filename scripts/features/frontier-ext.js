@@ -4635,6 +4635,7 @@
         : null;
 
     const hpSnapshot = {};
+    const hpSnapshotDetail = {};
     try {
       if (typeof team !== "undefined" && typeof pkmn !== "undefined") {
         // Frontier teams only ever use slot1-3 (Gen 3 Emerald rule,
@@ -4646,13 +4647,34 @@
           if (!team[sl] || !team[sl].pkmn || !team[sl].pkmn.id) continue;
           const p = pkmn[team[sl].pkmn.id];
           if (p && typeof p.playerHp === "number") hpSnapshot[sl] = p.playerHp;
+          if (p) hpSnapshotDetail[sl] = { id: team[sl].pkmn.id, hp: p.playerHp, max: p.playerHpMax };
         }
       }
     } catch (e) { /* ignore */ }
 
+    console.log("[arena-judge] VERDICT FIRE",
+      "playerWins=" + playerWins,
+      "active=" + snapshotActive.playerSlot,
+      "activeSpecies=" + snapshotPlayerPkmnId,
+      "snapshot=", hpSnapshotDetail);
+
     // Freeze combat ticks during the pause, then deliver the KO + reset.
     const globalEval = eval;
     setTimeout(() => {
+      // Telemetry: dump HP of every team slot at the moment the
+      // setTimeout fires — BEFORE we touch anything. If bench slots
+      // already show 0 HP here, something outside our code killed
+      // them during the pause.
+      try {
+        const preDump = {};
+        for (const sl of ["slot1", "slot2", "slot3"]) {
+          if (team[sl] && team[sl].pkmn && team[sl].pkmn.id && pkmn[team[sl].pkmn.id]) {
+            const p = pkmn[team[sl].pkmn.id];
+            preDump[sl] = { id: team[sl].pkmn.id, hp: p.playerHp, max: p.playerHpMax };
+          }
+        }
+        console.log("[arena-judge] timeout fires. playerWins=" + playerWins, "preDump=", preDump);
+      } catch (e) { /* ignore */ }
       try {
         if (playerWins) {
           // Enemy's active only — write 0 to wild HP; the engine's
@@ -4705,7 +4727,32 @@
             }
           }
 
+          // Telemetry: dump HP after my restore pass.
+          try {
+            const postDump = {};
+            for (const sl of ["slot1", "slot2", "slot3"]) {
+              if (team[sl] && team[sl].pkmn && team[sl].pkmn.id && pkmn[team[sl].pkmn.id]) {
+                const p = pkmn[team[sl].pkmn.id];
+                postDump[sl] = { id: team[sl].pkmn.id, hp: p.playerHp, max: p.playerHpMax };
+              }
+            }
+            console.log("[arena-judge] after restore", "killedSpecies=" + killedSpeciesId, "postDump=", postDump);
+          } catch (e) { /* ignore */ }
+
           if (typeof updateTeamPkmn === "function") updateTeamPkmn();
+
+          // Final telemetry: AFTER updateTeamPkmn, to see if the
+          // engine re-normalises anything.
+          try {
+            const finalDump = {};
+            for (const sl of ["slot1", "slot2", "slot3"]) {
+              if (team[sl] && team[sl].pkmn && team[sl].pkmn.id && pkmn[team[sl].pkmn.id]) {
+                const p = pkmn[team[sl].pkmn.id];
+                finalDump[sl] = { id: team[sl].pkmn.id, hp: p.playerHp, max: p.playerHpMax };
+              }
+            }
+            console.log("[arena-judge] after updateTeamPkmn", "finalDump=", finalDump);
+          } catch (e) { /* ignore */ }
         }
       } catch (e) { console.error("[frontier-ext] arena force-KO failed:", e); }
 
