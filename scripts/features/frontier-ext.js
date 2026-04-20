@@ -686,9 +686,17 @@
         maxStreaks: {},
         symbols: {},
         activeRun: null,
+        pausedRuns: {},
       };
     }
     if (saved.frontierExt.activeRun === undefined) saved.frontierExt.activeRun = null;
+    // `pausedRuns` dict keyed by facilityId — stores runs the player
+    // paused via the "Repos" button after a cleared round. Unlike
+    // `activeRun` (which locks the team + blocks other facilities),
+    // paused runs carry zero locks. Resuming one makes it the new
+    // activeRun. Multiple paused runs can coexist (one per facility);
+    // at most one activeRun at a time.
+    if (!saved.frontierExt.pausedRuns) saved.frontierExt.pausedRuns = {};
     for (const f of FACILITIES) {
       if (saved.frontierExt.streaks[f.id] === undefined) saved.frontierExt.streaks[f.id] = 0;
       if (saved.frontierExt.maxStreaks[f.id] === undefined) saved.frontierExt.maxStreaks[f.id] = 0;
@@ -696,6 +704,23 @@
     }
     // Upgrade any legacy Pike state in-place (poison → poisoned etc.).
     migratePikeState();
+  }
+
+  // Helper — returns the effective "run for this facility" whether
+  // active (currently locked in combat mode) or paused (saved for later
+  // resume). Callers that need to distinguish can still read activeRun /
+  // pausedRuns directly.
+  function getRunForFacility(facilityId) {
+    if (!saved || !saved.frontierExt) return null;
+    const active = saved.frontierExt.activeRun;
+    if (active && active.facilityId === facilityId) return active;
+    return (saved.frontierExt.pausedRuns && saved.frontierExt.pausedRuns[facilityId]) || null;
+  }
+
+  function isPausedRun(facilityId) {
+    return !!(saved && saved.frontierExt
+              && saved.frontierExt.pausedRuns
+              && saved.frontierExt.pausedRuns[facilityId]);
   }
 
   // ─── 3b. TRAINER GENERATOR ────────────────────────────────────────────────
@@ -1606,10 +1631,31 @@
             0 0 12px rgba(231, 76, 60, 0.9);
         }
       }
+      /* Paused badge — muted amber pill, static (no pulse). Sits in the
+         same slot as the EN COURS tag; only one appears at a time per
+         tile because the run is either active or paused, never both. */
+      .frontier-ext-paused-tag {
+        display: inline-block;
+        background: linear-gradient(90deg, #7a5a1a, #c08a2a, #7a5a1a);
+        color: #fff2d0;
+        font-size: 0.7rem;
+        padding: 0.1rem 0.55rem;
+        border-radius: 0.2rem;
+        margin-left: 0.3rem;
+        vertical-align: middle;
+        letter-spacing: 0.05em;
+        font-weight: bold;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+        box-shadow:
+          0 0 0 1px rgba(255, 200, 100, 0.4),
+          0 0 4px rgba(192, 138, 42, 0.45);
+        filter: hue-rotate(calc(var(--hue, 0deg) * -1));
+      }
       /* When the whole tile is darkened (locked by unlock gate), the
          in-progress badge can't sit on a locked tile anyway — but keep
          the override defensive just in case the feature ever overlaps. */
-      .frontier-ext-tile.locked .frontier-ext-inprogress-tag {
+      .frontier-ext-tile.locked .frontier-ext-inprogress-tag,
+      .frontier-ext-tile.locked .frontier-ext-paused-tag {
         display: none;
       }
       /* Heat sticker — orange-red flame pill that rides next to the
@@ -2832,24 +2878,31 @@
 
     const unlocked = isUnlocked();
 
-    // "En cours" badge — lights up in red when this specific facility
-    // has the active run. Makes the one-run-at-a-time rule visible at
-    // a glance without opening each tile.
+    // "EN COURS" / "EN PAUSE" badge — surfaces the run state on the
+    // tile so the player knows at a glance which facilities have a
+    // live or paused streak, without opening each one. Active = red
+    // pulse, paused = muted amber.
     const activeRun = saved.frontierExt && saved.frontierExt.activeRun;
-    const isRunHere = activeRun && activeRun.facilityId === facility.id;
-    const inProgressLabel = lang === "fr" ? "EN COURS" : "IN PROGRESS";
-    const inProgressTag = isRunHere
-      ? `<span class="frontier-ext-inprogress-tag" title="Run ${activeRun.round + 1}/${nextGoalRoundFor(activeRun.round + 1, facility)}">● ${inProgressLabel}</span>`
-      : "";
+    const pausedRun = saved.frontierExt && saved.frontierExt.pausedRuns
+      && saved.frontierExt.pausedRuns[facility.id];
+    const tileRun = (activeRun && activeRun.facilityId === facility.id) ? activeRun : pausedRun;
+    const isActiveHere = !!(activeRun && activeRun.facilityId === facility.id);
+    const isPausedHere = !isActiveHere && !!pausedRun;
+    const activeLabel = lang === "fr" ? "EN COURS" : "IN PROGRESS";
+    const pausedLabel = lang === "fr" ? "EN PAUSE" : "PAUSED";
+    let inProgressTag = "";
+    if (isActiveHere) {
+      inProgressTag = `<span class="frontier-ext-inprogress-tag" title="Run ${tileRun.round + 1}/${nextGoalRoundFor(tileRun.round + 1, facility)}">● ${activeLabel}</span>`;
+    } else if (isPausedHere) {
+      inProgressTag = `<span class="frontier-ext-paused-tag" title="Paused at round ${tileRun.round + 1}">⏸ ${pausedLabel}</span>`;
+    }
     // "🔥 Difficulté croissante" sticker: lights up on the facility tile
-    // as soon as the player enters a post-Gold rematch cycle (mult ≥ 2).
-    // Disappears automatically when the streak breaks because activeRun
-    // gets nulled on defeat / abandon / silent-kill-with-modal. Multiplier
-    // reflects the upcoming round so the tile updates live as the run
-    // progresses past each rematch threshold.
+    // as soon as the run (active OR paused) is past Gold with a
+    // multiplier ≥ 2. Disappears when the streak ends. Multiplier
+    // reflects the upcoming round.
     let heatTag = "";
-    if (isRunHere) {
-      const upcomingMult = difficultyMultiplier(activeRun.round + 1, facility);
+    if (tileRun) {
+      const upcomingMult = difficultyMultiplier(tileRun.round + 1, facility);
       if (upcomingMult >= 2) {
         const heatTitle = lang === "fr"
           ? `Difficulté ×${upcomingMult} — série en zone rematch`
@@ -3030,13 +3083,15 @@
     const brainName = lang === "fr" ? facility.brain.nameFr : facility.brain.nameEn;
 
     ensureSaveSlot();
-    const run = saved.frontierExt.activeRun;
-    const isActive = run && run.facilityId === facility.id;
-    // If a run is active in a DIFFERENT facility, block this one with a
-    // clear "finish or abandon your current run first" message — keeps
-    // the rules simple: one active ZdC challenge at a time, the locked
-    // team follows that challenge, no cross-facility team juggling.
-    if (run && !isActive) {
+    const activeRun = saved.frontierExt.activeRun;
+    const pausedRun = saved.frontierExt.pausedRuns && saved.frontierExt.pausedRuns[facility.id];
+    const isActive = activeRun && activeRun.facilityId === facility.id;
+    const isPaused = !isActive && !!pausedRun;
+    const run = isActive ? activeRun : (isPaused ? pausedRun : null);
+    // Block only when ANOTHER facility holds the active (locked) run.
+    // Paused runs in other facilities never block — they're by design
+    // frozen and unlocked, so the player can hop between facilities.
+    if (activeRun && activeRun.facilityId !== facility.id) {
       showRunInProgressElsewhere(facility);
       return;
     }
@@ -3051,8 +3106,10 @@
           brain: `${meneurRole} :`,
           maxStreak: "Meilleure série :",
           inProgress: "Série en cours",
+          paused: "En pause",
           start: "Commencer une série",
           cont: "Continuer (Round {r})",
+          resume: "Reprendre (Round {r})",
           rest: "Repos",
           abandon: "Abandonner",
           round: "Round",
@@ -3068,8 +3125,10 @@
           brain: `${zoneLeaderEn()}:`,
           maxStreak: "Best streak:",
           inProgress: "Run in progress",
+          paused: "Paused",
           start: "Start a run",
           cont: "Continue (Round {r})",
+          resume: "Resume (Round {r})",
           rest: "Rest",
           abandon: "Abandon",
           round: "Round",
@@ -3094,13 +3153,14 @@
       title.innerHTML = name;
     }
 
-    const nextRound = isActive ? run.round + 1 : 1;
-    const isBossRound = !!getBossRoundInfo(nextRound, facility);
+    const hasRun = isActive || isPaused;
+    const nextRound = hasRun ? run.round + 1 : 1;
+    const isBossRound = hasRun && !!getBossRoundInfo(nextRound, facility);
 
     if (mid) {
       mid.style.display = "block";
       let html = `<div style="padding:0.4rem 0.8rem;font-style:italic;opacity:0.9;">`;
-      if (isActive) {
+      if (hasRun) {
         const dome = isDomeFacility(facility);
         const pike = isPikeFacility(facility);
         const perRound = battlesPerRound(facility);
@@ -3115,12 +3175,13 @@
           // round counter hasn't ticked over yet (7 battles = 1 round).
           battleStr = ` · ${lang === "fr" ? "Combat" : "Battle"} ${run.battleInRound || 1}/${perRound}`;
         }
-        html += `<strong>${t.inProgress}</strong> — ${t.round} ${run.round + 1}/${nextGoalRoundFor(run.round + 1, facility)}${battleStr}`;
+        const stateLabel = isPaused ? t.paused : t.inProgress;
+        html += `<strong>${stateLabel}</strong> — ${t.round} ${run.round + 1}/${nextGoalRoundFor(run.round + 1, facility)}${battleStr}`;
       } else {
         html += `${lang === "fr" ? facility.descFr : facility.descEn}`;
       }
       html += `</div>`;
-      if (isBossRound && isActive) {
+      if (isBossRound) {
         const info = getBossRoundInfo(nextRound, facility);
         let bannerTxt = "";
         if (info) {
@@ -3135,20 +3196,28 @@
 
     if (bottom) {
       bottom.style.display = "block";
-      // In-progress row: Continue (primary) + Rest (neutral, pauses
-      // without killing the streak) + Abandon (danger). Matches the
-      // round-cleared modal layout so the player sees the same three
-      // choices whether they're between rounds or just reopened the
-      // facility tile mid-paused-run.
-      const buttons = isActive
-        ? `
+      // Button row depends on state:
+      //   • Active (locked in combat) — Continue + Rest + Abandon
+      //   • Paused (resumeable, no lock) — Resume + Abandon (no Rest
+      //     because the run is already paused)
+      //   • Fresh — Start only
+      let buttons;
+      if (isActive) {
+        buttons = `
           <button class="frontier-ext-action-btn primary" data-action="continue">${t.cont.replace("{r}", run.round + 1)}</button>
           <button class="frontier-ext-action-btn" data-action="rest">${t.rest}</button>
           <button class="frontier-ext-action-btn danger" data-action="abandon">${t.abandon}</button>
-        `
-        : `
+        `;
+      } else if (isPaused) {
+        buttons = `
+          <button class="frontier-ext-action-btn primary" data-action="resume">${t.resume.replace("{r}", run.round + 1)}</button>
+          <button class="frontier-ext-action-btn danger" data-action="abandon">${t.abandon}</button>
+        `;
+      } else {
+        buttons = `
           <button class="frontier-ext-action-btn primary" data-action="start">${t.start}</button>
         `;
+      }
 
       bottom.innerHTML = `
         <div class="frontier-ext-help-rules" style="grid-template-columns:auto 1fr;">
@@ -3918,26 +3987,35 @@
       return;
     }
     if (action === "abandon") {
-      if (run) {
-        const finalRound = run.round;
+      // Abandon fires from two places: active-run in-progress tooltip
+      // (run stored on activeRun), and paused-run tooltip (run stored
+      // on pausedRuns[facility.id]). Cover both: pick whichever is
+      // bound to this facility.
+      const activeHere = run && run.facilityId === facility.id ? run : null;
+      const pausedHere = saved.frontierExt.pausedRuns && saved.frontierExt.pausedRuns[facility.id];
+      const doomedRun = activeHere || pausedHere;
+      if (doomedRun) {
+        const finalRound = doomedRun.round;
         if (finalRound > (saved.frontierExt.maxStreaks[facility.id] || 0)) {
           saved.frontierExt.maxStreaks[facility.id] = finalRound;
         }
-        // Factory: restore original preview slot + move overrides BEFORE
-        // clearing activeRun, otherwise we lose the stash reference.
-        if (isFactoryFacility(facility)) cleanupFactoryRun(run);
-        // Restore enemy IV/ability overrides (non-Factory). Usually the
-        // exitCombat hook already did this, but abandon from between
-        // rounds never enters combat — defensive restore here so the
-        // pkmn dict never leaks a Frontier override into the main game.
-        try { restoreEnemyRuntimeStats(run); } catch (e) { /* ignore */ }
+        if (isFactoryFacility(facility)) {
+          try { cleanupFactoryRun(doomedRun); } catch (e) { /* ignore */ }
+        }
+        try { restoreEnemyRuntimeStats(doomedRun); } catch (e) { /* ignore */ }
         if (isPyramidFacility(facility)) {
           try { setPyramidModalSizing(false); } catch (e) { /* ignore */ }
-          run.pyramid = null;
+          doomedRun.pyramid = null;
         }
       }
-      saved.frontierExt.activeRun = null;
-      // Team stays unlocked now that the challenge is over.
+      // Clear from whichever slot held it + zero the streak counter.
+      if (activeHere) saved.frontierExt.activeRun = null;
+      if (pausedHere && saved.frontierExt.pausedRuns) {
+        delete saved.frontierExt.pausedRuns[facility.id];
+      }
+      saved.frontierExt.streaks[facility.id] = 0;
+      // Team stays unlocked now that the challenge is over. removeLock
+      // is a no-op if the lock wasn't applied (paused-run abandon).
       try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
       refreshActiveFrontierView();
       if (typeof closeTooltip === "function") closeTooltip();
@@ -3947,17 +4025,77 @@
       openFacilityPreview(facility);
       return;
     }
-    // "Rest" between rounds — close the cleared-round modal without
-    // touching activeRun. The run stays alive with roundJustCleared=true
-    // so the facility tile's tooltip still shows "Continue (Round N+1)"
-    // whenever the player comes back. Team stays unlocked in the
-    // meantime. If they truly want to abandon, the in-progress tooltip
-    // on the tile offers that action explicitly.
+    // "Rest" — pause the current run FULLY. Moves activeRun into
+    // pausedRuns[facilityId], removes every lock (team, other-facility
+    // blocking, Factory preview slot, enemy stat overrides), and closes
+    // the tooltip. The in-progress sticker still shows on the tile
+    // because getRunForFacility returns the paused record; clicking
+    // the tile later offers Resume / Abandon. While paused the player
+    // can freely use their team elsewhere, start a run in a different
+    // facility, etc. Multiple paused runs can coexist — one per
+    // facility — since they carry zero locks.
     if (action === "rest") {
+      const run = saved.frontierExt.activeRun;
+      if (run && run.facilityId === facility.id) {
+        // Belt & braces: restore all the runtime overrides before we
+        // let the team out of the lock (Factory preview slot, enemy
+        // pkmn[id] IV/ability stashes, etc.).
+        if (isFactoryFacility(facility)) {
+          try { cleanupFactoryRun(run); } catch (e) { /* ignore */ }
+        }
+        try { restoreEnemyRuntimeStats(run); } catch (e) { /* ignore */ }
+        // Keep the run object so Resume can pick up exactly where it
+        // left off. Drop transient UI-only fields that should reroll
+        // on resume: upcomingTrainer (would reuse a stale preview),
+        // factory pool/selection/team (re-picked at resume), pike
+        // doors (re-rolled each room anyway), pyramid floor (re-
+        // generates on next entry).
+        run.upcomingTrainer = null;
+        run.factoryPool = null;
+        run.factorySelection = [];
+        run.factoryTeam = null;
+        run.pikeDoors = null;
+        run.pikeDoorPicked = null;
+        run.pyramid = null;
+        saved.frontierExt.pausedRuns[run.facilityId] = run;
+        saved.frontierExt.activeRun = null;
+        try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
+      }
       if (typeof closeTooltip === "function") closeTooltip();
-      // Refresh the frontier listing so the tile re-renders with the
-      // in-progress badge + heat sticker if applicable.
       refreshActiveFrontierView();
+      return;
+    }
+    // "Resume" — pull a paused run back into activeRun and re-apply
+    // the team lock. Only fires when openFacilityPreview surfaced the
+    // Resume button (i.e. pausedRuns[facilityId] exists AND no other
+    // active run is in progress).
+    if (action === "resume") {
+      const paused = saved.frontierExt.pausedRuns && saved.frontierExt.pausedRuns[facility.id];
+      if (!paused) return;
+      // Guard against race: only resume if no other facility is
+      // currently active. openFacilityPreview already blocks the
+      // entry UI in that case, but belt & braces here in case of
+      // programmatic resume.
+      if (saved.frontierExt.activeRun && saved.frontierExt.activeRun.facilityId !== facility.id) {
+        showRunInProgressElsewhere(facility);
+        return;
+      }
+      // Re-tie to whichever preview slot the player currently has
+      // selected (they may have edited/swapped teams while paused).
+      // Factory is exempt — it owns FACTORY_PREVIEW_SLOT and will
+      // regenerate rentals on next round preview.
+      if (!isFactoryFacility(facility)) {
+        paused.tiedPreviewSlot = saved.currentPreviewTeam;
+      }
+      // Flag set when resuming — the facility preview's "Continue"
+      // button will route to the next-step screen. We keep
+      // roundJustCleared truthy so the tooltip shows the between-
+      // rounds Continue button shape rather than mid-round.
+      paused.roundJustCleared = true;
+      saved.frontierExt.activeRun = paused;
+      delete saved.frontierExt.pausedRuns[facility.id];
+      try { applyFrontierTeamLock(); } catch (e) { /* ignore */ }
+      openFacilityPreview(facility);
       return;
     }
     if (action === "launch") {
@@ -4000,6 +4138,12 @@
     window.tooltipData = function (category, data) {
       if (category === "help" && typeof data === "string" && data.indexOf("FrontierExt:") === 0) {
         const facId = data.slice("FrontierExt:".length);
+        // Section-level help (the "?" icon on the Hoenn tab header).
+        if (facId === "__section__") {
+          fillHoennSectionHelp();
+          if (typeof openTooltip === "function") openTooltip();
+          return;
+        }
         const facility = FACILITIES.find((f) => f.id === facId);
         if (facility) {
           fillHelpTooltip(facility);
@@ -4009,6 +4153,90 @@
       }
       return origTooltipData.apply(this, arguments);
     };
+  }
+
+  // Fills the help tooltip with section-wide Hoenn ZdC rules — shown
+  // when the player clicks the "?" next to the Hoenn tab header. Covers
+  // what's different from the vanilla Battle Frontier: Gen 3 rules,
+  // teams of 3, level 100, no division restriction, Rest/Resume flow,
+  // mini-boss and rematch mechanics.
+  function fillHoennSectionHelp() {
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const top = document.getElementById("tooltipTop");
+    const title = document.getElementById("tooltipTitle");
+    const mid = document.getElementById("tooltipMid");
+    const bottom = document.getElementById("tooltipBottom");
+    if (top) top.style.display = "none";
+    if (bottom) bottom.style.display = "none";
+    if (title) {
+      title.style.display = "block";
+      title.innerHTML = lang === "fr"
+        ? "⚔️ ZdC d'Hoenn — Règles"
+        : "⚔️ Hoenn Battle Frontier — Rules";
+    }
+    if (mid) {
+      mid.style.display = "block";
+      const body = lang === "fr" ? [
+        ["Règles canoniques Gen 3", [
+          "Pokémon niveau 100 requis.",
+          "Équipes de 3 Pokémon par série.",
+          "Aucune restriction de division (S, SS, SSS autorisés).",
+          "Chaque facility applique ses propres règles (Usine = locations, Pic = 14 salles à portes, Pyramide = 7 étages, etc.).",
+        ]],
+        ["Série / Repos / Reprise", [
+          "Commencer une série verrouille ton équipe et bloque les autres facilities ZdC — une série active à la fois.",
+          "À la fin de chaque round tu as trois choix : Continuer, Repos, ou Abandonner.",
+          "« Repos » met la facility en pause : équipe déverrouillée, tu peux jouer ailleurs, relancer une série dans une autre facility. Autant de pauses que de facilities, toutes coexistent.",
+          "« Reprendre » depuis la tuile réactive le mode frontier sur la série mise en pause.",
+          "Fermer le jeu (F5, changement de langue, reload) pendant une série active = défaite, série remise à 0. Les séries en pause survivent.",
+        ]],
+        ["Cerveaux de Zone et multiplicateur", [
+          "Chaque facility a ses rounds Argent et Or — c'est à ces rounds que tu affrontes le Meneur/Meneuse de Zone.",
+          "Après l'Or, il revient pour des revanches post-Gold avec un multiplicateur ×2, ×3, etc. Les stats ennemies montent à chaque palier.",
+          "Le 7e combat d'un round non-boss est un « Gardien de round » — statistiques boostées, talent caché.",
+        ]],
+        ["Ennemis : IV, talents, capacités", [
+          "Les IV ennemis grimpent linéairement de 0 à 6 entre le round 1 et le round Or, puis restent au max.",
+          "Talents cachés forcés au round Or et sur toutes les revanches.",
+          "Capacités signatures et egg moves injectés automatiquement côté ennemi à partir du round Argent.",
+          "Chaque Meneur/Meneuse a une équipe Argent et une équipe Or canoniques.",
+        ]],
+      ] : [
+        ["Canonical Gen 3 rules", [
+          "Pokémon level 100 required.",
+          "Teams of 3 Pokémon per run.",
+          "No division restrictions (S, SS, SSS all allowed).",
+          "Each facility applies its own ruleset (Factory = rentals, Pike = 14 rooms with doors, Pyramid = 7-floor dungeon, etc.).",
+        ]],
+        ["Run / Rest / Resume", [
+          "Starting a run locks your team and blocks the other Hoenn facilities — one active run at a time.",
+          "At the end of each round you get three choices: Continue, Rest, or Abandon.",
+          "Rest puts the facility on pause: team unlocked, you can play elsewhere, start another run in another facility. All pauses coexist.",
+          "Resume from the tile reactivates frontier mode on the paused run.",
+          "Closing the game (F5, language toggle, reload) during an ACTIVE run counts as defeat — streak goes to 0. Paused runs survive.",
+        ]],
+        ["Zone Leaders and multiplier", [
+          "Each facility has its own Silver and Gold rounds where you face the Zone Leader.",
+          "After Gold, they return with post-Gold rematches at multiplier ×2, ×3, etc. Enemy stats scale at every tier.",
+          "The 7th battle of a non-boss round is a \"round guardian\" — boosted stats, hidden ability.",
+        ]],
+        ["Enemy IVs, abilities, moves", [
+          "Enemy IVs ramp linearly from 0 to 6 between round 1 and the Gold round, then stay maxed.",
+          "Hidden abilities forced at Gold and on every rematch.",
+          "Signature and egg moves injected on the enemy side starting at Silver.",
+          "Each Zone Leader has canonical Silver and Gold teams.",
+        ]],
+      ];
+      const blocks = body.map(([heading, items]) => {
+        const list = items.map((txt) => `<li style="margin:0.15rem 0;">${txt}</li>`).join("");
+        return `
+          <div style="padding:0.3rem 0.8rem;">
+            <div style="font-weight:bold;color:var(--dark1,#2a1a0a);margin-bottom:0.2rem;">${heading}</div>
+            <ul style="padding-left:1.1rem;margin:0.1rem 0 0.4rem;">${list}</ul>
+          </div>`;
+      }).join("");
+      mid.innerHTML = blocks;
+    }
   }
 
   function fillHelpTooltip(facility) {
@@ -8146,11 +8374,15 @@
         const header = document.getElementById("vs-menu-header");
         if (header) {
           const helpLabel = lang === "fr" ? "ZdC d'Hoenn" : "Hoenn BF";
-          // No data-help attribute + no "?" icon — there's no contextual
-          // help entry registered for Hoenn, so the help tooltip opens
-          // empty / falls through to the wrong body. Keep the header
-          // plain; the divider below already explains the section.
-          header.innerHTML = `<span>⚔️ ${helpLabel}</span>`;
+          // "?" icon routed to our own section-level help via the
+          // data-help="FrontierExt:__section__" convention — picked up
+          // by installHelpTooltip's wrapper on tooltipData, which
+          // dispatches to fillHoennSectionHelp().
+          header.innerHTML = `
+            <span>⚔️ ${helpLabel}</span>
+            <span class="header-help" data-help="FrontierExt:__section__" style="cursor:help">
+              <svg style="opacity:0.8; pointer-events:none" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><g fill="currentColor"><path d="M11 16.25a1.25 1.25 0 1 1-2.5 0a1.25 1.25 0 0 1 2.5 0"/><path fill-rule="evenodd" d="M9.71 4.065c-.807 0-1.524.24-2.053.614c-.51.36-.825.826-.922 1.308a.75.75 0 1 1-1.47-.297c.186-.922.762-1.696 1.526-2.236c.796-.562 1.82-.89 2.919-.89c2.325 0 4.508 1.535 4.508 3.757c0 1.292-.768 2.376-1.834 3.029a.75.75 0 0 1-.784-1.28c.729-.446 1.118-1.093 1.118-1.749c0-1.099-1.182-2.256-3.008-2.256m0 5.265a.75.75 0 0 1 .75.75v1.502a.75.75 0 1 1-1.5 0V10.08a.75.75 0 0 1 .75-.75" clip-rule="evenodd"/></g></svg>
+            </span>`;
         }
 
         // Fill our listing: divider + 7 tiles.
@@ -8205,6 +8437,40 @@
       sanitizeNullSlots();
       recoverCorruptedDomeTeam();
     } catch (e) { /* ignore — saved may not be ready yet */ }
+
+    // F5 / language toggle / page reload mid-run = defeat. Rationale:
+    // the whole point of "Repos" is to give the player a safe exit
+    // path; if they F5'd instead, the team lock couldn't have been
+    // preserved anyway (DOM classes don't survive reload) and the run
+    // was already compromised. Paused runs (pausedRuns[]) are untouched
+    // — they're the legit "saved for later" state. Wrapped in a
+    // retry because `saved` can load async after script boot.
+    const forfeitOnBoot = () => {
+      try {
+        if (!saved || !saved.frontierExt) return false;
+        const run = saved.frontierExt.activeRun;
+        if (!run) return true;
+        const finalRound = run.round || 0;
+        if (finalRound > (saved.frontierExt.maxStreaks[run.facilityId] || 0)) {
+          saved.frontierExt.maxStreaks[run.facilityId] = finalRound;
+        }
+        saved.frontierExt.streaks[run.facilityId] = 0;
+        saved.frontierExt.activeRun = null;
+        try { restoreEnemyRuntimeStats(run); } catch (e) { /* ignore */ }
+        const fac = FACILITIES.find((f) => f.id === run.facilityId);
+        if (fac && isFactoryFacility(fac)) {
+          try { cleanupFactoryRun(run); } catch (e) { /* ignore */ }
+        }
+        try { removeFrontierTeamLock(); } catch (e) { /* ignore */ }
+        return true;
+      } catch (e) { return false; }
+    };
+    let forfeitAttempts = 0;
+    const forfeitRetry = () => {
+      if (forfeitOnBoot()) return;
+      if (++forfeitAttempts < 10) setTimeout(forfeitRetry, 250);
+    };
+    forfeitRetry();
     // Saved may load asynchronously after script runs — retry the
     // sanitizer a few times over the first couple seconds so the fix
     // lands regardless of the game's init ordering.
