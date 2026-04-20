@@ -6551,12 +6551,24 @@
     { id: "fullRestore", labelFr: "Guérison",     labelEn: "Full Restore",  kind: "heal_full_cure" },
     { id: "revive",      labelFr: "Rappel",       labelEn: "Revive",        kind: "revive", ratio: 0.5 },
     { id: "maxRevive",   labelFr: "Rappel Max",   labelEn: "Max Revive",    kind: "revive", ratio: 1.0 },
-    // Held items — stored in the bag, no immediate effect on pickup.
-    { id: "choiceBand",  labelFr: "Band. Choix",  labelEn: "Choice Band",   kind: "held" },
-    { id: "muscleBand",  labelFr: "Muscle",       labelEn: "Muscle Band",   kind: "held" },
-    { id: "wideLens",    labelFr: "Précision",    labelEn: "Wide Lens",     kind: "held" },
-    { id: "leftovers",   labelFr: "Restes",       labelEn: "Leftovers",     kind: "held" },
-    { id: "quickClaw",   labelFr: "Vive Griffe",  labelEn: "Quick Claw",    kind: "held" },
+    // Held items — every entry exists in Pokechill's itemDictionary so
+    // combat code actually reads + applies them. Items from the
+    // canonical wiki list that aren't in Pokechill (Muscle Band, Wide
+    // Lens, incense variants, etc.) were dropped per user rule "retire
+    // les items hold qui servent à rien en combat". We top up the pool
+    // with broadly-useful Gen 6+ holds that Pokechill does ship.
+    { id: "choiceBand",      labelFr: "Band. Choix",       labelEn: "Choice Band",      kind: "held" },
+    { id: "choiceSpecs",     labelFr: "Lunettes Choix",    labelEn: "Choice Specs",     kind: "held" },
+    { id: "leftovers",       labelFr: "Restes",            labelEn: "Leftovers",        kind: "held" },
+    { id: "quickClaw",       labelFr: "Vive Griffe",       labelEn: "Quick Claw",       kind: "held" },
+    { id: "lifeOrb",         labelFr: "Orbe Vie",          labelEn: "Life Orb",         kind: "held" },
+    { id: "assaultVest",     labelFr: "Veste de Combat",   labelEn: "Assault Vest",     kind: "held" },
+    { id: "weaknessPolicy",  labelFr: "Vulné-Assurance",   labelEn: "Weakness Policy",  kind: "held" },
+    { id: "loadedDice",      labelFr: "Dés Pipés",         labelEn: "Loaded Dice",      kind: "held" },
+    { id: "eviolite",        labelFr: "Évoluroc",          labelEn: "Eviolite",         kind: "held" },
+    { id: "mentalHerb",      labelFr: "Herbe Mental",      labelEn: "Mental Herb",      kind: "held" },
+    { id: "clearAmulet",     labelFr: "Amulette Purif.",   labelEn: "Clear Amulet",     kind: "held" },
+    { id: "heavyDutyBoots",  labelFr: "Grosses Bottes",    labelEn: "Heavy-Duty Boots", kind: "held" },
   ];
 
   const PYRAMID_BAG_CAP = 10; // max 10 distinct item ids in the Combat Bag
