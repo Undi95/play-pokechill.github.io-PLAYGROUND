@@ -116,14 +116,14 @@
     {
       id: "frontierArenaSecret",
       nameEn: "Battle Arena (Hoenn)",
-      nameFr: "Arène de Combat (Hoenn)",
-      descEn: "3 turns max per battle. If neither side KOs, judges decide based on Mind / Skill / Body scores.",
-      descFr: "3 tours max par combat. Si aucun K.O., le jury décide selon Esprit / Technique / Corps.",
+      nameFr: "Dojo de Combat (Hoenn)",
+      descEn: "3-turn maximum per fight, no switching allowed. If no KO, the judge rules based on Mental / Technique / Physique.",
+      descFr: "3 tours max par combat, aucun changement autorisé. Si aucun K.O., l'arbitre tranche selon Mental / Technique / Physique.",
       brain: {
         id: "greta",
         sprite: "arena_tycoon_greta",
         nameEn: "Arena Tycoon Greta",
-        nameFr: "Maîtresse de l'Arène Gabrielle",
+        nameFr: "Maîtresse du Dojo Gabrielle",
         teamSilver: ["heracross", "umbreon", "hariyama"],
         teamGold: ["hariyama", "shedinja", "medicham"],
       },
@@ -2212,6 +2212,18 @@
         background: rgba(192, 57, 43, 0.85) !important;
         border-color: rgba(255, 180, 180, 0.5) !important;
       }
+      /* Active-run lock: when the facility preview or combat-launch
+         modal is open with an ACTIVE (locked) run, the only valid exits
+         are the in-modal buttons (Continuer / Repos / Abandonner on
+         preview, Lancer / Abandonner on combat launch). The default
+         close × would silently dismiss the tooltip, leaving the run
+         active but the UI state confused. Hide the close button so the
+         player is forced to commit. Paused runs KEEP the close button
+         because the run is already parked. */
+      #tooltipBackground.frontier-ext-run-lock-open #tooltipClose,
+      #tooltipBackground:has(#tooltipBox.frontier-ext-run-lock-open) #tooltipClose {
+        display: none !important;
+      }
       /* ── Battle Pyramid — dungeon map ──────────────────────────────── */
       .frontier-ext-pyr-grid {
         display: grid;
@@ -2720,21 +2732,31 @@
          Drops in from the top of the screen when the Arena's 3-turn judge
          fires. Auto-dismisses after 4 seconds. Green border on victory,
          red on loss. */
+      /* Arena verdict card — Emerald-styled scoresheet + arbiter dialog.
+         Three criteria (Mental / Technique / Physique), each awarding a
+         symbol per side: ● red circle = 2pt win, △ blue triangle = 1pt
+         tie, ✕ black cross = 0pt loss. Symbols reveal one row at a time
+         with staggered animation, then the totals strike in, then an
+         arbiter dialog announces the outcome. */
       .frontier-ext-arena-verdict {
         position: fixed;
-        top: 1.5rem;
+        top: 2rem;
         left: 50%;
         transform: translate(-50%, -150%);
         z-index: 9999;
-        background: linear-gradient(180deg, #2b1d10 0%, #1a0e08 100%);
-        color: #ffecc9;
-        padding: 1rem 1.3rem;
-        border-radius: 0.5rem;
+        background:
+          linear-gradient(180deg, #fdf8e6 0%, #e8dcae 55%, #c7b877 100%);
+        color: #2a1e07;
+        padding: 0.75rem 0.9rem 0.9rem;
+        border-radius: 0.6rem;
         box-shadow:
-          0 6px 20px rgba(0, 0, 0, 0.7),
-          inset 0 0 0 1px rgba(255, 200, 120, 0.2);
+          0 6px 20px rgba(0, 0, 0, 0.55),
+          inset 0 0 0 2px #3b2a0d,
+          inset 0 0 0 4px #fdf8e6,
+          inset 0 0 0 6px #8a6a1c;
         min-width: 22rem;
         max-width: 26rem;
+        font-family: "Segoe UI", system-ui, sans-serif;
         font-size: 0.95rem;
         opacity: 0;
         transition: transform 0.35s cubic-bezier(.3,1.4,.6,1), opacity 0.35s;
@@ -2744,52 +2766,103 @@
         opacity: 1;
         transform: translate(-50%, 0);
       }
-      .frontier-ext-arena-verdict.win {
-        border: 2px solid #6ab04c;
-        box-shadow:
-          0 6px 20px rgba(0, 0, 0, 0.7),
-          0 0 18px rgba(106, 176, 76, 0.45),
-          inset 0 0 0 1px rgba(106, 176, 76, 0.3);
-      }
-      .frontier-ext-arena-verdict.lose {
-        border: 2px solid #c0392b;
-        box-shadow:
-          0 6px 20px rgba(0, 0, 0, 0.7),
-          0 0 18px rgba(192, 57, 43, 0.45),
-          inset 0 0 0 1px rgba(192, 57, 43, 0.3);
-      }
-      .frontier-ext-arena-verdict .title {
-        font-size: 1.2rem;
+      .frontier-ext-arena-verdict .verdict-title {
+        font-size: 1.05rem;
         font-weight: bold;
         text-align: center;
-        margin-bottom: 0.6rem;
-        color: #ffd700;
-        text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+        margin: 0 0 0.55rem;
+        color: #4a2e0a;
+        letter-spacing: 0.04em;
+        text-shadow: 0 1px 0 rgba(255,255,255,0.55);
       }
-      .frontier-ext-arena-verdict.lose .title { color: #ffb3b3; }
-      .frontier-ext-arena-verdict .rows {
-        display: flex;
-        flex-direction: column;
-        gap: 0.3rem;
-      }
-      .frontier-ext-arena-verdict .row {
+      .frontier-ext-arena-verdict .verdict-head {
         display: grid;
-        grid-template-columns: 5.5rem 1fr 1fr;
+        grid-template-columns: 1fr 6rem 1fr;
         gap: 0.4rem;
         align-items: center;
+        font-weight: bold;
+        font-size: 0.85rem;
+        color: #2d1e05;
+        margin-bottom: 0.3rem;
+      }
+      .frontier-ext-arena-verdict .verdict-head .you    { text-align: right;  color: #3a5fa6; }
+      .frontier-ext-arena-verdict .verdict-head .them   { text-align: left;   color: #a03838; }
+      .frontier-ext-arena-verdict .verdict-head .criterion { text-align: center; color: #5a4208; }
+      .frontier-ext-arena-verdict .verdict-rows {
+        display: flex;
+        flex-direction: column;
+        gap: 0.28rem;
+        border-top: 1px solid #8a6a1c;
+        border-bottom: 1px solid #8a6a1c;
+        padding: 0.35rem 0.15rem;
+        background: rgba(255,255,255,0.28);
+      }
+      .frontier-ext-arena-verdict .verdict-row {
+        display: grid;
+        grid-template-columns: 1fr 6rem 1fr;
+        gap: 0.4rem;
+        align-items: center;
+        opacity: 0;
+        transform: translateY(4px);
+        transition: opacity 0.35s ease, transform 0.35s ease;
+      }
+      .frontier-ext-arena-verdict .verdict-row.shown {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      .frontier-ext-arena-verdict .verdict-row .label {
+        text-align: center;
+        font-weight: bold;
+        color: #4a2e0a;
+        font-size: 0.9rem;
+        letter-spacing: 0.03em;
+      }
+      .frontier-ext-arena-verdict .verdict-row .mark {
+        font-size: 1.6rem;
+        line-height: 1;
+        font-weight: bold;
+        display: inline-block;
+      }
+      .frontier-ext-arena-verdict .verdict-row .mark.left  { text-align: right;  padding-right: 0.4rem; }
+      .frontier-ext-arena-verdict .verdict-row .mark.right { text-align: left;   padding-left:  0.4rem; }
+      .frontier-ext-arena-verdict .mark-win  { color: #c83434; text-shadow: 0 0 3px rgba(200,52,52,0.45); }
+      .frontier-ext-arena-verdict .mark-tie  { color: #2c5fb0; text-shadow: 0 0 3px rgba(44,95,176,0.45); }
+      .frontier-ext-arena-verdict .mark-lose { color: #1a1a1a; opacity: 0.85; }
+      .frontier-ext-arena-verdict .verdict-total {
+        display: grid;
+        grid-template-columns: 1fr 6rem 1fr;
+        gap: 0.4rem;
+        align-items: center;
+        font-weight: bold;
+        margin-top: 0.4rem;
+        font-size: 1rem;
+        opacity: 0;
+        transition: opacity 0.35s ease;
+      }
+      .frontier-ext-arena-verdict .verdict-total.shown { opacity: 1; }
+      .frontier-ext-arena-verdict .verdict-total .you    { text-align: right;  color: #1d3a78; }
+      .frontier-ext-arena-verdict .verdict-total .them   { text-align: left;   color: #7a1515; }
+      .frontier-ext-arena-verdict .verdict-total .sep    { text-align: center; color: #4a2e0a; letter-spacing: 0.12em; }
+      .frontier-ext-arena-verdict .verdict-arbiter {
+        margin-top: 0.5rem;
+        padding: 0.45rem 0.55rem;
+        background: linear-gradient(180deg, #fdf8e6, #e8d99b);
+        border: 1px solid #5a4208;
+        border-radius: 0.35rem;
         font-size: 0.88rem;
+        color: #2a1e07;
+        min-height: 1.4rem;
+        line-height: 1.3;
+        opacity: 0;
+        transition: opacity 0.3s ease;
       }
-      .frontier-ext-arena-verdict .row .label {
+      .frontier-ext-arena-verdict .verdict-arbiter.shown { opacity: 1; }
+      .frontier-ext-arena-verdict .verdict-arbiter .speaker {
+        display: inline-block;
         font-weight: bold;
-        color: #e0c3ff;
-      }
-      .frontier-ext-arena-verdict .row .win {
-        color: #8effac;
-        font-weight: bold;
-      }
-      .frontier-ext-arena-verdict .row .lose {
-        color: #ff9999;
-        opacity: 0.8;
+        color: #5a2e02;
+        letter-spacing: 0.05em;
+        margin-right: 0.25rem;
       }
       /* Per-slot HP + status overlay inside the locked team preview.
          Positioned top-right because the game's #{team-i-held-item}
@@ -3076,7 +3149,10 @@
       if (box) {
         box.classList.remove("frontier-ext-factory-open");
         box.classList.remove("frontier-ext-pyramid-open");
+        box.classList.remove("frontier-ext-run-lock-open");
       }
+      const bg = document.getElementById("tooltipBackground");
+      if (bg) bg.classList.remove("frontier-ext-run-lock-open");
     } catch (e) { /* ignore */ }
     const lang = window.gameLang === "fr" ? "fr" : "en";
     const name = lang === "fr" ? facility.nameFr : facility.nameEn;
@@ -3233,6 +3309,18 @@
         btn.onclick = () => handleRunAction(btn.dataset.action, facility);
       });
     }
+
+    // Lock the close × when the active run is bound to THIS facility —
+    // user must pick Continuer / Repos / Abandonner. Paused runs keep
+    // the × because they're already parked; fresh facilities too.
+    try {
+      const bg = document.getElementById("tooltipBackground");
+      const box = document.getElementById("tooltipBox");
+      if (isActive) {
+        if (bg)  bg.classList.add("frontier-ext-run-lock-open");
+        if (box) box.classList.add("frontier-ext-run-lock-open");
+      }
+    } catch (e) { /* ignore */ }
 
     if (typeof openTooltip === "function") openTooltip();
   }
@@ -3821,6 +3909,14 @@
         btn.onclick = () => handleRunAction(btn.dataset.action, facility);
       });
     }
+    // Combat-launch is always locked to an active run — hide the close
+    // ×, forcing Launch or Abandon.
+    try {
+      const bg = document.getElementById("tooltipBackground");
+      const box = document.getElementById("tooltipBox");
+      if (bg)  bg.classList.add("frontier-ext-run-lock-open");
+      if (box) box.classList.add("frontier-ext-run-lock-open");
+    } catch (e) { /* ignore */ }
     if (typeof openTooltip === "function") openTooltip();
   }
 
@@ -4548,60 +4644,156 @@
     };
   }
 
-  // Verdict UI — drops a temporary overlay at the top of the combat screen
-  // so the player sees the 3-criterion breakdown before the normal
-  // post-combat screen fires. Auto-removes after 4 seconds.
-  function showArenaVerdict(playerWins, scores, hpRatios) {
-    try {
-      const lang = window.gameLang === "fr" ? "fr" : "en";
-      const l = lang === "fr"
-        ? { title: playerWins ? "⚖️ Jury : Victoire !" : "⚖️ Jury : Défaite",
-            mind: "Esprit", skill: "Technique", body: "Corps",
-            you: "Toi", them: "Adversaire" }
-        : { title: playerWins ? "⚖️ Judges: Victory!" : "⚖️ Judges: Loss",
-            mind: "Mind", skill: "Skill", body: "Body",
-            you: "You", them: "Opponent" };
-      const row = (label, pWon, pVal, eVal) => `
-        <div class="row">
-          <span class="label">${label}</span>
-          <span class="${pWon ? "win" : "lose"}">${l.you} ${pVal}</span>
-          <span class="${pWon ? "lose" : "win"}">${l.them} ${eVal}</span>
-        </div>`;
-      const pct = (r) => Math.round(r * 100) + "%";
-      // HP damage tallies accumulate floats (e.g. residual-damage ticks
-      // subtract 6.25 HP per frame), so round at display time — the
-      // judge card should read "120 HP" not "119.875 HP".
-      const hp = (v) => Math.round(v || 0) + " HP";
-      // Mind is computed as a ratio (attacks ÷ total moves) — displaying
-      // raw attack counts hid that a setup-heavy opponent could lose
-      // Mind even with more attacks. Show "X/Y" so the ratio is visible.
-      const mindCell = (att, mv) => `${att}/${mv || 0}`;
-      const host = document.createElement("div");
-      host.className = "frontier-ext-arena-verdict " + (playerWins ? "win" : "lose");
-      host.innerHTML = `
-        <div class="title">${l.title}</div>
-        <div class="rows">
-          ${row(l.mind, scores.mindPlayerWins, mindCell(scores.playerAttacks, scores.playerMoves), mindCell(scores.enemyAttacks, scores.enemyMoves))}
-          ${row(l.skill, scores.skillPlayerWins, hp(scores.playerDamage), hp(scores.enemyDamage))}
-          ${row(l.body, scores.bodyPlayerWins, pct(hpRatios.playerRatio), pct(hpRatios.enemyRatio))}
-        </div>
-      `;
-      document.body.appendChild(host);
-      // Force reflow then animate in
-      requestAnimationFrame(() => host.classList.add("show"));
-      setTimeout(() => {
-        host.classList.remove("show");
-        setTimeout(() => { try { host.remove(); } catch (e) {} }, 400);
-      }, 4000);
-    } catch (e) { console.error("[frontier-ext] arena verdict overlay failed:", e); }
+  // Per-criterion scoring — canonical Emerald rules:
+  //   • Win     → 2pt (cercle rouge ●)
+  //   • Égalité → 1pt (triangle bleu △)
+  //   • Défaite → 0pt (croix noire ✕)
+  // Total across Mental + Technique + Physique → whoever has fewer
+  // points is KO'd. Equal totals → BOTH active Pokémon are KO'd.
+  // `eps` is the "close enough to call it a tie" threshold — continuous
+  // criteria (damage, HP%) need a tolerance so residual float drift
+  // doesn't crown an arbitrary winner.
+  function arenaScoreCriterion(playerVal, enemyVal, eps) {
+    if (Math.abs(playerVal - enemyVal) <= eps) return { p: 1, e: 1, tie: true };
+    if (playerVal > enemyVal)                  return { p: 2, e: 0, tie: false, playerWins: true };
+    return { p: 0, e: 2, tie: false, playerWins: false };
+  }
+  function arenaMarkChar(score) {
+    return score === 2 ? "●" : score === 1 ? "△" : "✕";
+  }
+  function arenaMarkClass(score) {
+    return score === 2 ? "mark-win" : score === 1 ? "mark-tie" : "mark-lose";
   }
 
-  const ARENA_PAUSE_MS = 3000; // verdict display + combat freeze window
+  // Verdict UI — Emerald-styled scoresheet that reveals each criterion
+  // in sequence (1.2s per stage), then the totals, then an arbiter
+  // dialog announcing the outcome. The return value is the total time
+  // the overlay will stay on screen — arenaRenderJudge uses it to time
+  // the actual KO so the ruling and the faint animation stay in sync.
+  function showArenaVerdict(outcome) {
+    const lang = window.gameLang === "fr" ? "fr" : "en";
+    const l = lang === "fr"
+      ? {
+          title: "Décision du Jury",
+          cat: ["Catégorie 1, le mental!", "Catégorie 2, la technique!", "Catégorie 3, le physique!"],
+          labelMental: "MENTAL",
+          labelTechnique: "TECHNIQUE",
+          labelPhysique: "PHYSIQUE",
+          arbiter: "ARBITRE:",
+          // Index: 0 = mental, 1 = technique, 2 = physique
+          winVerbs: [
+            { p: "Le POKÉMON du joueur a attaqué le plus de fois!", e: "Le POKÉMON adverse a attaqué le plus de fois!", tie: "Les deux POKÉMON ont attaqué autant de fois!" },
+            { p: "Le POKÉMON du joueur a le mieux touché son adversaire!", e: "Le POKÉMON adverse a le mieux touché son adversaire!", tie: "Les deux POKÉMON ont été aussi efficaces!" },
+            { p: "Le POKÉMON du joueur a conservé le plus d'énergie!", e: "Le POKÉMON adverse a conservé le plus d'énergie!", tie: "Les deux POKÉMON ont autant d'énergie!" },
+          ],
+          winnerLine: (kind) => kind === "player"
+            ? "Le POKÉMON adverse est K.O."
+            : kind === "enemy"
+              ? "Votre POKÉMON est K.O."
+              : "Les deux POKÉMON sont K.O. !",
+        }
+      : {
+          title: "Judge's Decision",
+          cat: ["Category 1, Mind!", "Category 2, Skill!", "Category 3, Body!"],
+          labelMental: "MIND",
+          labelTechnique: "SKILL",
+          labelPhysique: "BODY",
+          arbiter: "JUDGE:",
+          winVerbs: [
+            { p: "Player's POKéMON attacked the most!", e: "Opponent's POKéMON attacked the most!", tie: "Both POKéMON attacked equally often!" },
+            { p: "Player's POKéMON landed its hits best!", e: "Opponent's POKéMON landed its hits best!", tie: "Both POKéMON were equally effective!" },
+            { p: "Player's POKéMON has the most energy left!", e: "Opponent's POKéMON has the most energy left!", tie: "Both POKéMON have equal energy!" },
+          ],
+          winnerLine: (kind) => kind === "player"
+            ? "Opponent's POKéMON is knocked out!"
+            : kind === "enemy"
+              ? "Your POKéMON is knocked out!"
+              : "Both POKéMON are knocked out!",
+        };
+
+    const host = document.createElement("div");
+    host.className = "frontier-ext-arena-verdict";
+    const row = (idx, label, sP, sE) => `
+      <div class="verdict-row" data-idx="${idx}">
+        <span class="mark left ${arenaMarkClass(sP)}">${arenaMarkChar(sP)}</span>
+        <span class="label">${label}</span>
+        <span class="mark right ${arenaMarkClass(sE)}">${arenaMarkChar(sE)}</span>
+      </div>`;
+    host.innerHTML = `
+      <div class="verdict-title">${l.title}</div>
+      <div class="verdict-head">
+        <span class="you">${lang === "fr" ? "Joueur" : "Player"}</span>
+        <span class="criterion">—</span>
+        <span class="them">${lang === "fr" ? "Adversaire" : "Opponent"}</span>
+      </div>
+      <div class="verdict-rows">
+        ${row(0, l.labelMental,    outcome.mental.p,    outcome.mental.e)}
+        ${row(1, l.labelTechnique, outcome.technique.p, outcome.technique.e)}
+        ${row(2, l.labelPhysique,  outcome.physique.p,  outcome.physique.e)}
+      </div>
+      <div class="verdict-total">
+        <span class="you">${outcome.totalP}</span>
+        <span class="sep">${lang === "fr" ? "Jugement" : "Judgment"}</span>
+        <span class="them">${outcome.totalE}</span>
+      </div>
+      <div class="verdict-arbiter"><span class="speaker">${l.arbiter}</span><span class="text"></span></div>
+    `;
+    document.body.appendChild(host);
+    requestAnimationFrame(() => host.classList.add("show"));
+
+    const rows = host.querySelectorAll(".verdict-row");
+    const totalEl = host.querySelector(".verdict-total");
+    const arbText = host.querySelector(".verdict-arbiter .text");
+    const arbBox  = host.querySelector(".verdict-arbiter");
+
+    const criteria = ["mental", "technique", "physique"];
+    const announce = (text) => {
+      arbText.textContent = " " + text;
+      arbBox.classList.add("shown");
+    };
+
+    // Stage timings: each criterion row reveals + arbiter line, 1.2s apart.
+    // Then totals appear at T=3600, final verdict line at T=4200.
+    const STAGE_MS = 1200;
+    criteria.forEach((key, i) => {
+      setTimeout(() => {
+        rows[i].classList.add("shown");
+        const s = outcome[key];
+        const verb = s.tie ? l.winVerbs[i].tie
+                   : s.playerWins ? l.winVerbs[i].p
+                                  : l.winVerbs[i].e;
+        announce(`${l.cat[i]} ${verb}`);
+      }, i * STAGE_MS);
+    });
+
+    setTimeout(() => { totalEl.classList.add("shown"); }, 3 * STAGE_MS);
+    setTimeout(() => {
+      const kind = outcome.totalP > outcome.totalE ? "player"
+                 : outcome.totalE > outcome.totalP ? "enemy" : "tie";
+      announce(l.winnerLine(kind));
+    }, 3 * STAGE_MS + 600);
+
+    const dismissAt = 3 * STAGE_MS + 2200;
+    setTimeout(() => {
+      try {
+        host.classList.remove("show");
+        setTimeout(() => { try { host.remove(); } catch (e) {} }, 400);
+      } catch (e) {}
+    }, dismissAt);
+
+    return dismissAt;
+  }
+
+  // Combat pause window — matches the longest verdict animation so the
+  // rAF loop stays frozen until the arbiter has finished speaking AND
+  // the final KO message has been visible for ~1s.
+  const ARENA_PAUSE_MS = 4800;
 
   // Compute per-matchup scores, show verdict overlay, freeze the combat
-  // for ARENA_PAUSE_MS, then KO ONLY the loser's active Pokémon. The
-  // game's own switchMemberNext / trainer-slot-advance logic then pulls
-  // in the next combatant and the counters reset.
+  // for ARENA_PAUSE_MS, then apply the KO(s). One of three branches:
+  //   • totalP > totalE → enemy active KO'd, engine pulls next enemy mon
+  //   • totalE > totalP → player active KO'd, engine switches to next mon
+  //   • totalP = totalE → BOTH active mons KO'd (double knockout)
   function arenaRenderJudge() {
     const state = arenaGetState();
     if (!state || state.judgeFired || state.judgeFiring) return;
@@ -4610,33 +4802,30 @@
     state.judgesFired = (state.judgesFired || 0) + 1;
 
     const hp = arenaReadHpRatios();
-    const bodyPlayerWins  = hp.playerRatio  > hp.enemyRatio;
-    const skillPlayerWins = state.playerDamage  > state.enemyDamage;
-    // Mind = "eagerness to attack" (canonical Emerald rule). Originally
-    // implemented as raw attack count, which a speed-stacking mon
-    // (Pachirisu + Costar + No Retreat → Speed +3) trivially dominated:
-    // 6-8 player attacks vs 3 enemy attacks meant Mind was a free win
-    // every matchup, and with Body or Skill the verdict locked at 2/3.
-    // Switching to an attack RATIO (attacks ÷ total moves) neutralises
-    // raw speed — both sides get ARENA_TURNS_PER_SIDE actions before
-    // the judge fires, so the question is "of those 3 actions, how many
-    // were offensive vs setup/status?". A setup-heavy mon now loses
-    // Mind even if they were faster.
+
+    // Mental (canonical "eagerness to attack") — ratio of offensive
+    // moves to total actions. Tie tolerance ≈ one-hundredth of a point
+    // so ratios like 2/3 vs 2/3 tie exactly; ≥ epsilon apart → strict
+    // ordering. Raw counts were exploitable by speed stackers (see the
+    // old Pachirisu + Costar + No Retreat write-up); ratios aren't.
     const playerMindRatio = state.playerMoves > 0 ? state.playerAttacks / state.playerMoves : 0;
     const enemyMindRatio  = state.enemyMoves  > 0 ? state.enemyAttacks  / state.enemyMoves  : 0;
-    const mindPlayerWins  = playerMindRatio > enemyMindRatio;
+    const mental    = arenaScoreCriterion(playerMindRatio, enemyMindRatio, 0.01);
 
-    let playerScore = 0;
-    if (bodyPlayerWins)  playerScore++;
-    if (skillPlayerWins) playerScore++;
-    if (mindPlayerWins)  playerScore++;
-    // Strict 2/3, with Body as the tiebreaker if it's the ONLY criterion won.
-    const playerWins = playerScore >= 2 || (playerScore === 1 && bodyPlayerWins);
+    // Technique — total damage dealt across the matchup. Floats accumulate
+    // to hundredths from residual ticks, so we use a 1 HP tolerance.
+    const technique = arenaScoreCriterion(state.playerDamage, state.enemyDamage, 1);
 
-    showArenaVerdict(playerWins, {
-      ...state,
-      bodyPlayerWins, skillPlayerWins, mindPlayerWins,
-    }, hp);
+    // Physique — current HP fraction of the active mon. 1%-point tolerance.
+    const physique  = arenaScoreCriterion(hp.playerRatio, hp.enemyRatio, 0.01);
+
+    const totalP = mental.p + technique.p + physique.p;
+    const totalE = mental.e + technique.e + physique.e;
+    const playerWins = totalP > totalE;
+    const enemyWins  = totalE > totalP;
+    const doubleKo   = totalP === totalE;
+
+    showArenaVerdict({ mental, technique, physique, totalP, totalE });
 
     // Snapshot BEFORE the 3s pause:
     //   • active slot + species (for the targeted KO)
@@ -4682,59 +4871,65 @@
     // invincibility window — during which the rAF loop would unfreeze
     // and pachirisu could squeeze an attack in.
     const globalEval = eval;
+    // Helper: KO the player's active mon snapshot-pinned at verdict
+    // time. Skips if already switched or if HP already 0. Returns the
+    // species id that was KO'd (or null), so the bench-restore loop
+    // knows which slot to leave at 0.
+    const koPlayerSnapshot = () => {
+      if (!snapshotPlayerPkmnId || typeof pkmn === "undefined") return null;
+      const snapSpec = pkmn[snapshotPlayerPkmnId];
+      const { playerSlot: nowSlot } = arenaReadActiveSlots();
+      const stillOnField = nowSlot === snapshotActive.playerSlot
+        && team[nowSlot]
+        && team[nowSlot].pkmn
+        && team[nowSlot].pkmn.id === snapshotPlayerPkmnId;
+      const stillAlive = snapSpec && (snapSpec.playerHp || 0) > 0;
+      if (stillOnField && stillAlive) {
+        snapSpec.playerHp = 0;
+        return snapshotPlayerPkmnId;
+      }
+      return null;
+    };
+    // Restore every OTHER bench slot's HP from snapshot — guard against
+    // residual ticks / weather / ghost hooks leaking damage during the
+    // verdict pause to mons who weren't on the field.
+    const restoreBench = (killedSpeciesId) => {
+      if (typeof team === "undefined" || typeof pkmn === "undefined") return;
+      for (const sl of ["slot1", "slot2", "slot3"]) {
+        if (!team[sl] || !team[sl].pkmn || !team[sl].pkmn.id) continue;
+        const speciesId = team[sl].pkmn.id;
+        if (killedSpeciesId && speciesId === killedSpeciesId) continue;
+        const snapHp = hpSnapshot[sl];
+        if (typeof snapHp !== "number" || snapHp <= 0) continue;
+        const p = pkmn[speciesId];
+        if (!p) continue;
+        if (typeof p.playerHp === "number" && p.playerHp < snapHp) {
+          p.playerHp = snapHp;
+        }
+      }
+    };
+
     setTimeout(() => {
       try {
         if (playerWins) {
-          // Enemy's active only — write 0 to wild HP; the engine's
-          // own trainer-slot-advance pulls in the next opponent mon.
+          // Enemy active only — write 0 to wild HP; engine's
+          // trainer-slot-advance pulls the next opponent mon.
           globalEval("wildPkmnHp = 0");
           if (typeof updateWildPkmn === "function") updateWildPkmn();
-        } else {
-          // The targeted player KO: only the mon who was on-field
-          // AT VERDICT time, only if they're still on that slot and
-          // still alive. Everyone else's HP gets restored from the
-          // pre-pause snapshot right after, so any collateral damage
-          // (residual ticks, weather, ghost hooks) from within the
-          // pause window is rolled back.
-          let killedSpeciesId = null;
-          if (snapshotPlayerPkmnId && typeof pkmn !== "undefined") {
-            const snapSpec = pkmn[snapshotPlayerPkmnId];
-            const { playerSlot: nowSlot } = arenaReadActiveSlots();
-            const stillOnField = nowSlot === snapshotActive.playerSlot
-              && team[nowSlot]
-              && team[nowSlot].pkmn
-              && team[nowSlot].pkmn.id === snapshotPlayerPkmnId;
-            const stillAlive = snapSpec && (snapSpec.playerHp || 0) > 0;
-            if (stillOnField && stillAlive) {
-              snapSpec.playerHp = 0;
-              killedSpeciesId = snapshotPlayerPkmnId;
-            }
-          }
-
-          // Restore every other slot's HP from the snapshot. Skips:
-          //   • the slot we just KO'd (keep the 0 we just wrote)
-          //   • slots whose HP actually dropped during the pause by a
-          //     TINY amount (< 1 HP, residual float drift) — snap to
-          //     the snapshot anyway
-          //   • slots whose HP was already 0 in the snapshot (already
-          //     dead before verdict — leave dead)
-          if (typeof team !== "undefined" && typeof pkmn !== "undefined") {
-            for (const sl of ["slot1", "slot2", "slot3"]) {
-              if (!team[sl] || !team[sl].pkmn || !team[sl].pkmn.id) continue;
-              const speciesId = team[sl].pkmn.id;
-              if (killedSpeciesId && speciesId === killedSpeciesId) continue;
-              const snapHp = hpSnapshot[sl];
-              if (typeof snapHp !== "number" || snapHp <= 0) continue;
-              const p = pkmn[speciesId];
-              if (!p) continue;
-              // Only restore if the engine somehow dropped HP below
-              // snapshot during the pause — otherwise leave it alone.
-              if (typeof p.playerHp === "number" && p.playerHp < snapHp) {
-                p.playerHp = snapHp;
-              }
-            }
-          }
-
+          restoreBench(null);
+        } else if (enemyWins) {
+          // Player active only.
+          const killedSpeciesId = koPlayerSnapshot();
+          restoreBench(killedSpeciesId);
+          if (typeof updateTeamPkmn === "function") updateTeamPkmn();
+        } else if (doubleKo) {
+          // Canonical Emerald: total-tie → BOTH active Pokémon are K.O.
+          // Write both 0s; engine's own switch/advance logic will spawn
+          // the next enemy mon AND advance the player's active member.
+          globalEval("wildPkmnHp = 0");
+          if (typeof updateWildPkmn === "function") updateWildPkmn();
+          const killedSpeciesId = koPlayerSnapshot();
+          restoreBench(killedSpeciesId);
           if (typeof updateTeamPkmn === "function") updateTeamPkmn();
         }
       } catch (e) { console.error("[frontier-ext] arena force-KO failed:", e); }
@@ -4743,16 +4938,13 @@
       // combat hooks will also catch the switch — this is belt+braces.
       arenaResetMatchup(state);
       // Flag clearing is split by branch:
-      //   • playerWins: KEEP judgeFiring=true. The game will spawn a
-      //     new enemy via setTimeout → setWildPkmn; our setWildPkmn
-      //     wrap detects this bridge case and extends the freeze for
-      //     ARENA_SWAP_FREEZE_MS before clearing everything. Without
-      //     this, there's a ~1s window between judgeFiring=false and
-      //     setWildPkmn firing during which animate's rAF loop
-      //     un-freezes and Pachirisu can slip an attack in.
-      //   • playerLoses: the player's own team advances (switchMemberNext)
-      //     — no setWildPkmn fires, no bridge needed. Clear right away.
-      if (!playerWins) {
+      //   • playerWins/doubleKo: keep judgeFiring=true. The game will
+      //     spawn a new enemy via respawnTimer → setWildPkmn; our
+      //     setWildPkmn wrap detects the bridge case, extends the
+      //     freeze for ARENA_SWAP_FREEZE_MS, then clears everything.
+      //   • enemyWins: the player's own team advances via
+      //     switchMemberNext — no setWildPkmn fires, no bridge needed.
+      if (enemyWins) {
         state.judgeFiring = false;
       }
     }, ARENA_PAUSE_MS);
@@ -4771,9 +4963,18 @@
   function arenaCheckJudge() {
     const state = arenaGetState();
     if (!state || state.judgeFired || state.judgeFiring) return;
-    const bothCompleted = state.playerMoves >= ARENA_TURNS_PER_SIDE
-                       && state.enemyMoves  >= ARENA_TURNS_PER_SIDE;
-    if (!bothCompleted) return;
+    // Fire when ENEMY has completed ARENA_TURNS_PER_SIDE actions,
+    // regardless of how many moves the player racked up. Rationale:
+    // with a Pachirisu + Speed+3 build the player finishes 3 moves
+    // long before the enemy manages even one, so the old
+    // "both >= 3" check waited a long time and often the player
+    // overkilled the enemy via raw DPS before the judge could
+    // intervene. With the enemy-only trigger, the judge forces a
+    // ruling every 3 enemy turns — which is the canonical Gen 3
+    // cadence (Emerald counts turns, not actions). The criteria
+    // themselves (Mind ratio / Skill / Body) still reward the
+    // player correctly for dominating damage output.
+    if (state.enemyMoves < ARENA_TURNS_PER_SIDE) return;
     const hp = arenaReadHpRatios();
     if (hp.wildHp <= 0 || hp.playerHp <= 0) return;
     arenaRenderJudge();
@@ -4796,7 +4997,7 @@
   // 1s window = both sides are "invincible" (combat frozen) while the
   // new enemy's sprite + HP settle in. After the window clears, combat
   // resumes naturally.
-  const ARENA_SWAP_FREEZE_MS = 1000;
+  const ARENA_SWAP_FREEZE_MS = 3000;
   function installArenaSwapFreeze() {
     if (typeof window.setWildPkmn !== "function") {
       setTimeout(installArenaSwapFreeze, 150);
@@ -4862,6 +5063,39 @@
           if (s && (s.judgeFiring || s.arenaSwapFreezing)) return true;
         }
       } catch (e) { /* fall through to orig */ }
+      return orig.apply(this, arguments);
+    };
+  }
+
+  // Block voluntary switches in the Dojo/Arena. Canonical Emerald rule:
+  // once a Pokémon is on the field, it fights until KO (3-turn judge
+  // verdict counts as a KO). Forced-switch moves (Baton Pass, Whirlwind)
+  // and Eject Button / Eject Pack all route through switchMember, so
+  // the single guard neutralises every voluntary path at once.
+  //
+  // Post-KO auto-switches (switchMemberNext called when the active's
+  // playerHp hit 0) still work: we only block when the active is ALIVE,
+  // mirroring the existing choiceSpecs/choiceBand guards at teams.js:608.
+  function installArenaSwitchBlock() {
+    if (typeof window.switchMember !== "function") {
+      setTimeout(installArenaSwitchBlock, 150);
+      return;
+    }
+    if (window.__arenaSwitchBlockHooked) return;
+    window.__arenaSwitchBlockHooked = true;
+    const orig = window.switchMember;
+    window.switchMember = function (member) {
+      try {
+        if (isInArenaRun()
+            && typeof exploreActiveMember !== "undefined"
+            && team[exploreActiveMember]
+            && team[exploreActiveMember].pkmn
+            && pkmn[team[exploreActiveMember].pkmn.id]
+            && pkmn[team[exploreActiveMember].pkmn.id].playerHp > 0
+            && exploreActiveMember !== member) {
+          return;
+        }
+      } catch (e) { /* fall through */ }
       return orig.apply(this, arguments);
     };
   }
@@ -5125,10 +5359,14 @@
       // puts both back to whatever the player actually had.
       p.level = 100;
       if (!p.caught || p.caught < 1) p.caught = 1;
-      // Level 100 in Pokechill corresponds to a specific exp threshold.
-      // Setting a very high value is safe: exp is clamped to the level's
-      // max by downstream code and never drives combat math directly.
-      p.exp = Math.max(p.exp || 0, 1000000);
+      // CRITICAL: exp must be < 100. updateTeamExp (explore.js:1795)
+      // recursively calls itself when exp >= 100 (it decrements by 100
+      // per iteration to process pending level-ups). Setting exp = 1M
+      // causes ~10k stack frames → RangeError: Maximum call stack size
+      // exceeded the first time updateTeamExp runs in Factory combat.
+      // Rentals are pinned at level 100 so they never actually level
+      // up; leave exp at whatever placeholder works for the level bar.
+      p.exp = 0;
     }
   }
   function restoreFactoryMoves(run) {
@@ -8641,6 +8879,7 @@
     installArenaCombatHooks();
     installArenaSwapFreeze();
     installArenaShouldCombatStopHook();
+    installArenaSwitchBlock();
     installTeamSanitizerHooks();
     installDomeTeamFilter();
     installPikeHpRestoreHook();
