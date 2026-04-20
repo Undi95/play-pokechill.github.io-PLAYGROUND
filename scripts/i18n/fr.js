@@ -939,7 +939,7 @@ window.i18n.fr.UI_TEXT_MAP = {
   "Prevents negative status effects while on": "preventsNegStatusWhileOn",
   "Prevents negative stat changes and status effects while on": "preventsNegStatsAndStatusWhileOn",
   "Attack": "statAttack",
-  "SPE ▼▼": "buffZzz",
+  "SPE ▼▼": "buffSpeDown2",
   "Cancel": "cancel",
   "caught": "caughtLabel",
   "Cheats": "cheats",
@@ -1365,12 +1365,12 @@ window.i18n.fr.GAME_UI = {
     buffSatk: "SATK",
     buffSdef: "SDEF",
     buffSpe: "SPE",
-    // buffZzz : la clé est mal nommée historiquement — UI_TEXT_MAP
-    // (ligne 942) mappe "SPE ▼▼" → buffZzz, donc la source EN reste
-    // "SPE ▼▼" et la traduction FR est "VIT ▼▼". Le vrai ZZZ du sommeil
-    // est rendu directement par explore.js:7873 (formatBuffs) sans
-    // passer par le pipeline i18n — il ne faut pas y toucher.
-    buffZzz: "SPE ▼▼",
+    // Anciennement nommée `buffZzz` (collision visuelle avec le ZZZ
+    // du sommeil). Renommée : UI_TEXT_MAP:942 mappe "SPE ▼▼" vers cette
+    // clé, la source EN reste donc "SPE ▼▼" (Speed down 2). Le vrai
+    // ZZZ du sommeil passe par explore.js:7873 (formatBuffs) et ne
+    // transite jamais par l'engine i18n — rien à changer côté sommeil.
+    buffSpeDown2: "SPE ▼▼",
     canBeBoughtInPokeMart: "<span>Can be bought in the Poke-Mart</span>",
     canBeDroppedDungeonArea:
       "<span>Can be dropped in the dungeon area ${format(i)} (Rotation ${areas[i].rotation})</span>",
@@ -3119,13 +3119,12 @@ window.i18n.fr.GAME_UI = {
     buffSatk: "ATQ.SP",
     buffSdef: "DEF.SP",
     buffSpe: "VIT",
-    // NB: la clé `buffZzz` est mal nommée — en amont (UI_TEXT_MAP ligne
-    // 942) elle mappe la pill "SPE ▼▼" vers cette clé, donc la vraie
-    // traduction FR doit être "VIT ▼▼" (Vitesse Down 2). Valeur
-    // précédente "ZZZ" causait l'affichage d'un double "ZZZ" sur les
-    // ennemis paralysés-vitesse + endormis — le sommeil est aussi
-    // rendu "ZZZ" par formatBuffs(sleep) dans explore.js.
-    buffZzz: "VIT ▼▼",
+    // Traduction FR de la pill « SPE ▼▼ » (voir UI_TEXT_MAP:942 pour
+    // le binding). Anciennement nommée buffZzz avec valeur "ZZZ", ce
+    // qui causait un double « ZZZ » affiché sur les ennemis ralentis
+    // et endormis simultanément — le sommeil étant lui-même rendu
+    // « ZZZ » en dur par explore.js:7873.
+    buffSpeDown2: "VIT ▼▼",
     canBeBoughtInPokeMart: "Peut être acheté au Poke-Mart",
     canBeDroppedDungeonArea:
       "Peut être obtenu dans la zone de donjon {area} (Rotation {rotation})",
