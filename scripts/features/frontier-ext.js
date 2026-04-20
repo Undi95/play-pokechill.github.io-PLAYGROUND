@@ -8566,6 +8566,13 @@
       // nature is already obvious (boss / tough fight).
       let hintHtml = "";
       if (!isFinalRoom) {
+        // Strict current-room guard: refuse to render a hint whose
+        // `room` tag doesn't match the preview we're drawing. Any
+        // stale hint is nulled out so the ask-button re-appears.
+        if (run.pikeHint && run.pikeHint.room !== undefined
+            && run.pikeHint.room !== run.pikeRoom) {
+          run.pikeHint = null;
+        }
         if (run.pikeHint && typeof run.pikeHint.doorIdx === "number") {
           const cat = run.pikeHint.category;
           const hintText = {
@@ -8626,15 +8633,22 @@
   function requestPikeHint(facility) {
     const run = saved.frontierExt.activeRun;
     if (!run || !Array.isArray(run.pikeDoors)) return;
-    if (run.pikeHint && typeof run.pikeHint.doorIdx === "number") {
-      // Already asked; just re-render the preview (idempotent).
+    // If the stored hint is still bound to the CURRENT room, reuse it
+    // (idempotent re-render). Otherwise discard it — a stale hint
+    // could have leaked through an edge case; this is the safety net.
+    if (run.pikeHint
+        && typeof run.pikeHint.doorIdx === "number"
+        && run.pikeHint.room === run.pikeRoom) {
       openPikeRoomPreview(facility);
       return;
     }
     const doorIdx = Math.floor(Math.random() * run.pikeDoors.length);
     const door = run.pikeDoors[doorIdx];
     const category = PIKE_HINT_CATEGORY[door.type] || "presence";
-    run.pikeHint = { doorIdx, category };
+    // Stamp the hint with the room it was rolled FOR so the display
+    // branch can refuse to render when the tag is stale — guarantees
+    // "une salle d'avance" can't happen.
+    run.pikeHint = { doorIdx, category, room: run.pikeRoom };
     openPikeRoomPreview(facility);
   }
 
