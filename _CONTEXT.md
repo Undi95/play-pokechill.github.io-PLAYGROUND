@@ -1,7 +1,14 @@
 # Pokechill — Zone de Combat d'Hoenn (ZdC) — Dev Context
 
-> **Status** : active dev (2026-04-20) · remote `playground/main` · latest commit `fc106c2`
-> **Open thread** : Arena triple-kill still reported despite the `shouldCombatStop` hijack + no-gap bridge. User suggested a dedicated Arena combat system; we pushed back and tried bridging flags. Awaiting user's friend (programmer) to co-investigate.
+> **PR-ready architecture + data model + mutation contract** live in
+> [`scripts/features/FRONTIER_EXT.md`](./scripts/features/FRONTIER_EXT.md).
+> That's the canonical doc for anyone integrating the overlay. This
+> file is the **historical dev-scratch log** kept for in-session context
+> and future-Claude sessions.
+
+> **Status** : feature-complete, pre-PR audit passed (2026-04-21) · remote `playground/main`
+> **Confidence** : ~99.5 % on save-safety; all cross-cutting mutations audited, 0 high-severity exploits surfaced.
+> **Arena triple-kill thread** : closed — resolved by the `shouldCombatStop` hijack + `judgeFiring` / `arenaSwapFreezing` bridge. `installArenaCombatHooks` early-returns when either flag is set; no rAF leak under live probe.
 
 ---
 

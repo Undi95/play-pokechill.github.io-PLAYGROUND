@@ -1,31 +1,44 @@
-// ============================================
-// BATTLE FRONTIER EXTENSION — Hoenn Gen 3 ruleset (Pokémon Emerald)
-// ============================================
+// =============================================================================
+// ZONE DE COMBAT D'HOENN (Hoenn Battle Frontier) — Gen 3 Emerald overlay
+// =============================================================================
 //
-// Adds 7 "(Hoenn)" facilities to the existing Battle Frontier menu — each
-// labelled with the Hoenn region where the Gen 3 Battle Frontier lived:
-//   • Tour de Combat (Hoenn)       — trainer gauntlet, brain Anabel
-//   • Palace de Combat (Hoenn)     — auto-move by nature, brain Spenser
-//   • Arène de Combat (Hoenn)      — 3-turn judge system, brain Greta
-//   • Dôme de Combat (Hoenn)       — single-elim bracket, brain Tucker
-//   • Usine de Combat (Hoenn)      — random rentals + swap, brain Noland
-//   • Reptile de Combat (Hoenn)    — 3-door choose-your-fate, brain Lucy
-//   • Pyramide de Combat (Hoenn)   — dungeon grid, brain Brandon
+// Single-file overlay adding 7 Hoenn Battle Frontier facilities to Pokechill:
 //
-// Canonical Gen 3 rules:
-//   • Battle 7   → Silver Symbol (Frontier Brain 1st fight)
-//   • Battle 49  → Gold   Symbol (Frontier Brain rematch, upgraded team)
-//   • All facilities are "Repeatable" — replayable infinitely.
-//   • Teams of 3 Pokémon, level 100 required.
+//   ┌─────────────────────┬────────────────┬─────────┬──────────────────┐
+//   │ FR                  │ EN             │ Brain   │ Rule summary     │
+//   ├─────────────────────┼────────────────┼─────────┼──────────────────┤
+//   │ Tour de Combat      │ Battle Tower   │ Cathy   │ 7-battle streak  │
+//   │ Palace de Combat    │ Battle Palace  │ Esteban │ Nature autopicks │
+//   │ Dojo de Combat      │ Battle Arena   │ Carole  │ 3-turn judge     │
+//   │ Dôme de Combat      │ Battle Dome    │ Takim   │ Bracket tournoi  │
+//   │ Usine de Combat     │ Battle Factory │ Sam     │ Rental + swap    │
+//   │ Reptile de Combat   │ Battle Pike    │ Charline│ 14 rooms, 3 doors│
+//   │ Pyramide de Combat  │ Battle Pyramid │ Bayar   │ Grid + Combat Bag│
+//   └─────────────────────┴────────────────┴─────────┴──────────────────┘
 //
-// Same overlay pattern as scripts/i18n/:
-//   • No original game file touched.
-//   • Injected via one <script> tag in index.html.
-//   • Data-driven (FACILITIES array) — easy to tweak rules or add more.
-//   • Internal facility IDs keep the `...Secret` suffix for save-compat
-//     (switching to `...Hoenn` would wipe existing streak/symbol records).
+// Milestones per facility:
+//   • Silver Symbol  → specific round per facility (see silverRound field)
+//   • Gold   Symbol  → specific round per facility (see goldRound  field)
+//   • Post-Gold rematches keep looping with a rising difficulty multiplier.
 //
-// ============================================
+// Integration principles (non-negotiable):
+//   • No vanilla source file is modified — every piece of game-engine
+//     integration is a runtime wrap installed from the bootstrap pass
+//     (`install*Hook` functions, section 7). Each wrap is idempotent.
+//   • All persistent state lives under `saved.frontierExt.*`. Nothing
+//     else in the save is mutated without a paired restore path.
+//   • User-facing strings fork bilingual via `window.gameLang === "fr"`.
+//     Zero new entries are required in scripts/i18n/.
+//   • Facility defs are data-driven (FACILITIES array). Adding a new one
+//     is an append + a rule-branch or two.
+//
+// The `...Secret` suffix on internal facility ids is kept for save back-
+// compat — changing it would orphan every existing streak record.
+//
+// Full architecture, data model, install-hook reference, mutation contract,
+// extension guide, and testing notes:  scripts/features/FRONTIER_EXT.md
+//
+// =============================================================================
 (function () {
   "use strict";
 
@@ -4813,7 +4826,7 @@
     }
   }
 
-  // ─── 6b1. PALACE RULE — auto-move by nature (ÉTAPE 3) ────────────────────
+  // ─── 6b1. PALACE RULE — auto-move by nature ──────────────────────────────
   // Pokechill is an auto-battler: each Pokémon cycles slot1→2→3→4→1 via
   // `team[active].turn++` (explore.js:2412). The Palace overrides that
   // sequential cycle with a weighted random pick based on the Pokémon's
@@ -6468,21 +6481,36 @@
     openSimulatedFight(facility);
   }
 
-  // ─── 6b2c. PYRAMID RULE — 7-floor grid nav, hidden encounters ─────────────
+  // ─── 6b2c. PYRAMID RULE — grid dungeon + theme rotation + Combat Bag ────
   // Canonical Gen 3 Emerald Battle Pyramid:
-  //   • Each round = climb 7 floors. One floor at a time.
-  //   • Each floor is a grid with random layout: walkable floor, walls,
-  //     a stairs tile leading up, and hidden encounter tiles (trainers,
-  //     wild Pokémon, heal/cure items).
-  //   • Tile contents revealed only when the player walks onto them
-  //     (fog-of-contents — tile shape is visible, contents are "?").
-  //   • HP + status persist across all 7 floors (reuses Pike's runTeam).
-  //   • Final floor of a boss round (round 3 Silver, 10 Gold, post-Gold
-  //     rematches) culminates in a Brandon fight — otherwise it's just
-  //     normal stairs.
+  //   • Round = climb 7 floors (5×5 grid each) with persistent HP/status.
+  //   • Tile contents hidden ("?") until the player walks adjacent.
+  //   • Each trainer brings ONE Pokémon (canonical rule); wild
+  //     encounters are filtered by the current theme pool (see
+  //     PYRAMID_THEMES). Trainer species use the facility's normal
+  //     pool, NOT the theme — only wilds are theme-bound.
+  //   • Wild movesets are biased toward status moves (forces the
+  //     player to burn bag items to stay healthy — see
+  //     biasPyramidWildMoveset + PYRAMID_THEME_PREFERRED_STATUS_MOVES).
+  //   • Status-buff duration in-combat is forced to 99 turns while
+  //     inside a Pyramid run (installPyramidStatusStickHook) so
+  //     paralysis / poison / burn stick the whole fight.
+  //   • Final floor of a boss round culminates in Bayar (Brandon) —
+  //     pyramidEncounterKind = "brain" fires through launchCombat's
+  //     canonical-team branch.
   //
-  // Layout: 5×5 grid. Canonical Pyramid uses larger floors but 5×5 fits
-  // cleanly inside the tooltip without scrolling.
+  // Theme rotation: pyramidThemeIndex advances by one per successful
+  // series clear. Losing a run nulls activeRun, so the next entry
+  // begins at theme 0 — matches the canonical "perdre = retour au
+  // premier thème". The Kinésiste NPC (facility-preview row) reveals
+  // the CURRENT theme (which equals the theme the player is about to
+  // play, since the index is bumped before roundJustCleared posts).
+  //
+  // Combat Bag: a per-run inventory capped at 10 DISTINCT item ids.
+  // Consumables stack; held items don't (unique per id). Held items
+  // equip onto pikeTeam[slot].item and are mirrored into
+  // saved.previewTeams[tied][slot].item so the team-menu UI actually
+  // shows the icon (cleared on every exit — see FRONTIER_EXT.md).
   const PYR_GRID_SIZE = 5;
   const PYR_TILES = {
     EMPTY: "empty",
@@ -6491,27 +6519,13 @@
     TRAINER: "trainer",
     WILD: "wild",
     ITEM: "item",
-    // Legacy (kept for in-flight saves from before the item rework).
-    // Generator no longer produces these — applyPyramidTile maps them
-    // to safe no-ops / item equivalents on resolve.
+    // Legacy tile kinds — kept here so in-flight saves from before
+    // the item rework still parse. The generator no longer emits them
+    // and pyramidResolveTile maps them to safe no-ops on resolve.
     HEAL_FULL: "healFull",
     HEAL_PARTIAL: "healHalf",
     CURE_STATUS: "cure",
   };
-  // Visible revealed tiles have type info shown; unrevealed show "?" .
-  // Walls are always visible (structural) even before reveal.
-
-  // ─── 6d2. PYRAMID — Canonical Gen 3 Emerald rules ──────────────────────
-  // (separated from Pike: trainers have 1 Pokémon, wild encounters follow
-  // a per-series theme, item tiles drop into a persistent "Sac de Combat"
-  // whose contents carry over between successful rounds.)
-  //
-  // Theme rotation: each series (set of 7 floors cleared) shifts the
-  // theme index one step. 20 themes cycle in a determined order — per
-  // the user's spec, losing resets the index to 0 ("Si vous perdez, vous
-  // revenez à la première série"). A "Kinésiste" NPC (button in the
-  // floor map) reveals the upcoming theme before entry so the player can
-  // plan their team composition.
   const PYRAMID_THEMES = [
     { key: "paralysis",   labelFr: "Paralysie",             labelEn: "Paralysis",
       pool: ["plusle", "minun", "pikachu", "electabuzz", "vileplume", "manectric", "breloom", "jolteon"] },
@@ -9691,7 +9705,7 @@
     }
   }
 
-  // ─── 6c. REAL COMBAT LAUNCH (ÉTAPE 2) ─────────────────────────────────────
+  // ─── 6c. COMBAT LAUNCH ────────────────────────────────────────────────────
   // Ephemeral area id used throughout. Always reassigned before each fight.
   const RUN_AREA_ID = "frontierExtRun";
 
