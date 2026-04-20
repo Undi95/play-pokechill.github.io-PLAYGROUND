@@ -4616,13 +4616,15 @@
       bodyPlayerWins, skillPlayerWins, mindPlayerWins,
     }, hp);
 
-    // Snapshot the active slot + species NOW, before the 3s pause. If
-    // the mon dies to status tick / residual damage during the pause
-    // and the engine auto-switches to the next bench slot, we must
-    // NOT KO that new slot — the judge only rules on the mon who was
-    // on-field at verdict time. Reading arenaReadActiveSlots inside
-    // the setTimeout was the source of "jury kills 2 mons" reports
-    // when the first one happened to die mid-pause.
+    // Snapshot BEFORE the 3s pause:
+    //   • active slot + species (for the targeted KO)
+    //   • every team member's HP (used to restore the bench after the
+    //     KO, in case anything leaked damage to them during the
+    //     verdict window)
+    // Previous versions only snapshotted the active slot and trusted
+    // the engine to leave the bench alone — player reports kept
+    // surfacing "triple KO" after one verdict, so now we actively
+    // re-pin every non-losing slot's HP after we write the targeted 0.
     const snapshotActive = arenaReadActiveSlots();
     const snapshotPlayerPkmnId =
       snapshotActive.playerSlot
@@ -4632,20 +4634,34 @@
         ? team[snapshotActive.playerSlot].pkmn.id
         : null;
 
+    const hpSnapshot = {};
+    try {
+      if (typeof team !== "undefined" && typeof pkmn !== "undefined") {
+        for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
+          if (!team[sl] || !team[sl].pkmn || !team[sl].pkmn.id) continue;
+          const p = pkmn[team[sl].pkmn.id];
+          if (p && typeof p.playerHp === "number") hpSnapshot[sl] = p.playerHp;
+        }
+      }
+    } catch (e) { /* ignore */ }
+
     // Freeze combat ticks during the pause, then deliver the KO + reset.
     const globalEval = eval;
     setTimeout(() => {
       try {
         if (playerWins) {
-          // Enemy's active Pokémon only (wild HP goes to 0, game's own
-          // trainer-slot-advance handles pulling the next mon in).
+          // Enemy's active only — write 0 to wild HP; the engine's
+          // own trainer-slot-advance pulls in the next opponent mon.
           globalEval("wildPkmnHp = 0");
           if (typeof updateWildPkmn === "function") updateWildPkmn();
         } else {
-          // Player's mon who was on-field AT VERDICT — ONLY if they're
-          // still on-field (didn't swap out during the pause) AND they're
-          // still alive (didn't already faint to residual damage).
-          // Skipping the KO write in either case preserves the bench.
+          // The targeted player KO: only the mon who was on-field
+          // AT VERDICT time, only if they're still on that slot and
+          // still alive. Everyone else's HP gets restored from the
+          // pre-pause snapshot right after, so any collateral damage
+          // (residual ticks, weather, ghost hooks) from within the
+          // pause window is rolled back.
+          let killedSpeciesId = null;
           if (snapshotPlayerPkmnId && typeof pkmn !== "undefined") {
             const snapSpec = pkmn[snapshotPlayerPkmnId];
             const { playerSlot: nowSlot } = arenaReadActiveSlots();
@@ -4656,8 +4672,34 @@
             const stillAlive = snapSpec && (snapSpec.playerHp || 0) > 0;
             if (stillOnField && stillAlive) {
               snapSpec.playerHp = 0;
+              killedSpeciesId = snapshotPlayerPkmnId;
             }
           }
+
+          // Restore every other slot's HP from the snapshot. Skips:
+          //   • the slot we just KO'd (keep the 0 we just wrote)
+          //   • slots whose HP actually dropped during the pause by a
+          //     TINY amount (< 1 HP, residual float drift) — snap to
+          //     the snapshot anyway
+          //   • slots whose HP was already 0 in the snapshot (already
+          //     dead before verdict — leave dead)
+          if (typeof team !== "undefined" && typeof pkmn !== "undefined") {
+            for (const sl of ["slot1", "slot2", "slot3", "slot4", "slot5", "slot6"]) {
+              if (!team[sl] || !team[sl].pkmn || !team[sl].pkmn.id) continue;
+              const speciesId = team[sl].pkmn.id;
+              if (killedSpeciesId && speciesId === killedSpeciesId) continue;
+              const snapHp = hpSnapshot[sl];
+              if (typeof snapHp !== "number" || snapHp <= 0) continue;
+              const p = pkmn[speciesId];
+              if (!p) continue;
+              // Only restore if the engine somehow dropped HP below
+              // snapshot during the pause — otherwise leave it alone.
+              if (typeof p.playerHp === "number" && p.playerHp < snapHp) {
+                p.playerHp = snapHp;
+              }
+            }
+          }
+
           if (typeof updateTeamPkmn === "function") updateTeamPkmn();
         }
       } catch (e) { console.error("[frontier-ext] arena force-KO failed:", e); }
