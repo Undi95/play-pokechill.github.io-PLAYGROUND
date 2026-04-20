@@ -451,16 +451,80 @@
   // tier-bumped elite trainer.
   const PIKE_ROOM_COUNT = 14;
   const PIKE_DOOR_COUNT = 3;
-  // Status effects that a "trap" door can inflict. Names must match
-  // EXACTLY the buff keys Pokechill reads in combat: `team[slot].buffs`
-  // has numeric-turn entries for `poisoned` / `burn` / `paralysis`
-  // (explore.js:2566 / 2590 / 2345 etc.). `poisoned` is the canonical
-  // form — NOT "poison".
-  const PIKE_TRAP_STATUSES = ["poisoned", "burn", "paralysis"];
+  // Status effects that a status_species door can inflict. Names must
+  // match EXACTLY the buff keys Pokechill reads in combat: `team[slot].buffs`
+  // has numeric-turn entries for `poisoned` / `burn` / `paralysis` /
+  // `sleep` / `freeze` (explore.js:2566 / 2590 / 2345 etc.). `poisoned`
+  // is the canonical form — NOT "poison".
+  const PIKE_TRAP_STATUSES = ["poisoned", "burn", "paralysis", "sleep", "freeze"];
   // Large turn count so a Pike-applied buff persists across an entire
   // battle without wearing off. The game decrements the counter per turn
   // but never refills it — 99 turns is effectively infinite for a round.
   const PIKE_STATUS_TURNS = 99;
+
+  // Canonical Gen 3 Pike species-status inflictors. Each species in a
+  // status_species door rolls one of its configured statuses and applies
+  // it to N of the player's Pokémon, where N scales with room progression
+  // (see pikeStatusCountByRoom below). Type-based immunities are honoured.
+  //
+  // Examples surfaced in-game per Bulbapedia:
+  //   • Kirlia / Gardevoir — Hypnosis + Thunder Wave + Toxic + Will-O-Wisp
+  //   • Dusclops           — Ice Beam (freeze) + Will-O-Wisp (burn)
+  //   • Gloom / Vileplume  — Sleep Powder + Stun Spore + Poison Powder
+  //   • Parasect           — Spore (sleep)
+  //   • Seviper            — Glare (paralysis) + Poison Fang
+  const PIKE_STATUS_SPECIES = {
+    kirlia:    ["poisoned", "paralysis", "sleep", "burn"],
+    gardevoir: ["poisoned", "paralysis", "sleep", "burn"],
+    dusclops:  ["freeze", "burn"],
+    gloom:     ["sleep", "paralysis", "poisoned"],
+    vileplume: ["sleep", "paralysis", "poisoned"],
+    parasect:  ["sleep"],
+    seviper:   ["poisoned", "paralysis"],
+  };
+
+  // Room-progression count of Pokémon affected by a status_species door.
+  // Canonical thresholds: salle 1-5 → 1 mon, 6-10 → 2 mons, 11-14 → 3 mons.
+  function pikeStatusCountByRoom(room) {
+    if (room <= 5) return 1;
+    if (room <= 10) return 2;
+    return 3;
+  }
+
+  // Type-based immunity check. Keeps it to the basics the player expects:
+  //   • burn     — Fire types immune
+  //   • freeze   — Ice types immune
+  //   • paralysis — Electric types immune (Gen 6+ ruling, intuitive)
+  //   • poisoned  — Poison + Steel types immune
+  //   • sleep    — no type immunity (ability-only in vanilla)
+  function pikePkmnImmuneToStatus(pkmnId, status) {
+    if (typeof pkmn === "undefined" || !pkmn[pkmnId]) return false;
+    const types = [pkmn[pkmnId].type1, pkmn[pkmnId].type2].filter(Boolean);
+    if (status === "burn"      && types.includes("fire"))     return true;
+    if (status === "freeze"    && types.includes("ice"))      return true;
+    if (status === "paralysis" && types.includes("electric")) return true;
+    if (status === "poisoned"  && (types.includes("poison") || types.includes("steel"))) return true;
+    return false;
+  }
+
+  // Categories used by the receptionist hint. Each door type is bucketed
+  // so the hint text narrows the player's guess without fully revealing
+  // the outcome — mirrors the vague Gen 3 Pike hostess lines.
+  const PIKE_HINT_CATEGORY = {
+    combat_solo:    "presence",
+    heal_full:      "presence",
+    empty:          "conversation",
+    combat_tough:   "smell",
+    wild:           "smell",
+    status_species: "nostalgia",
+    heal_partial:   "nostalgia",
+    brain:          "dread",
+    // Legacy fallbacks for saves from before the rework:
+    combat:         "presence",
+    heal_half:      "nostalgia",
+    trap:           "nostalgia",
+    tough:          "smell",
+  };
 
   function isPikeFacility(facility) {
     return facility && facility.rules && facility.rules.chooseDoor;
@@ -2458,6 +2522,47 @@
         justify-content: center;
         flex-wrap: wrap;
       }
+      /* Receptionist hint — sits between the curtain row and the abandon
+         button. Before the button is clicked, it's a compact "ask"
+         prompt; after, it shows the vague clue text above the revealed
+         door number. */
+      .frontier-ext-pike-hint {
+        display: flex;
+        justify-content: center;
+        padding: 0.4rem 0.8rem 0.2rem;
+      }
+      .frontier-ext-pike-hint-btn {
+        background: linear-gradient(180deg, #3a2a1a 0%, #22160c 100%);
+        color: #f2d999;
+        border: 1px solid rgba(255, 210, 130, 0.35);
+        border-radius: 0.4rem;
+        padding: 0.35rem 0.7rem;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s, transform 0.1s;
+      }
+      .frontier-ext-pike-hint-btn:hover {
+        background: linear-gradient(180deg, #4a3620 0%, #2c1c10 100%);
+        border-color: rgba(255, 210, 130, 0.6);
+      }
+      .frontier-ext-pike-hint-btn:active { transform: translateY(1px); }
+      .frontier-ext-pike-hint.revealed {
+        flex-direction: column;
+        align-items: center;
+        gap: 0.15rem;
+        padding: 0.45rem 0.8rem 0.2rem;
+        color: #f2d999;
+        font-style: italic;
+        font-size: 0.88rem;
+        text-align: center;
+      }
+      .frontier-ext-pike-hint.revealed .intro {
+        color: #ffd87a;
+        font-weight: bold;
+        font-size: 0.82rem;
+        letter-spacing: 0.03em;
+      }
+      .frontier-ext-pike-hint.revealed .text { opacity: 0.9; }
       .frontier-ext-pike-door {
         position: relative;
         width: 6.2rem;
@@ -6308,6 +6413,7 @@
     const l = pikeL10n();
     const statusLabel = {
       poisoned: l.statusPoisoned, burn: l.statusBurn, paralysis: l.statusParalysis,
+      sleep: l.statusSleep, freeze: l.statusFreeze,
     };
     const cells = [];
     for (const sl of ["slot1", "slot2", "slot3"]) {
@@ -6506,7 +6612,7 @@
   const PIKE_L10N = {
     fr: {
       pickDoor: "Choisis une porte",
-      subDesc: "Les rideaux cachent combats, soins et pièges. Ton choix ne peut pas être annulé.",
+      subDesc: "Les rideaux cachent combats, soins, Pokémon sauvages et statuts. Ton choix ne peut pas être annulé.",
       room: "Salle",
       round: "Round",
       team: "Équipe",
@@ -6516,23 +6622,40 @@
       bossBanner: "⚡ Meneuse imminente !",
       healFullTitle: "Infirmière rencontrée !",
       healFullBody: "Toute ton équipe récupère 100% de ses PV et ses statuts sont soignés.",
-      healHalfTitle: "Source de soin",
-      healHalfBody: "Toute ton équipe récupère 50% de ses PV (le statut reste).",
-      trapTitle: "Piège déclenché !",
-      trapBody: "Un de tes Pokémon subit un statut.",
+      healPartialTitle: "Soigneuse de passage",
+      healPartialBody: (n) => `${n === 1 ? "Un Pokémon" : "Deux Pokémon"} de ton équipe récupère tous ses PV et est guéri de son statut.`,
+      toughHealTitle: "Victoire récompensée",
+      toughHealBody: "Ton équipe est intégralement soignée après ce combat difficile.",
+      statusTitle: "Pokémon hostile !",
+      statusBody: (species, status, n) => `Un ${species} sauvage t'a attaqué ! ${n === 1 ? "Un de tes Pokémon subit" : `${n} de tes Pokémon subissent`} le statut : ${status}.`,
+      wildTitle: "Pokémon sauvage !",
+      wildBody: "Un Pokémon sauvage t'attaque.",
+      emptyTitle: "Salle paisible",
+      emptyBody: "Tu as eu de la chance — personne ne t'attaque ici.",
       next: "Salle suivante",
       cancel: "Retour",
       back: "Retour",
       abandon: "Abandonner",
       fightBrain: "Affronter la Meneuse",
       fightTough: "Engager le combat",
+      fightWild: "Combattre le sauvage",
       statusPoisoned: "Empoisonné",
       statusBurn: "Brûlé",
       statusParalysis: "Paralysé",
+      statusSleep: "Endormi",
+      statusFreeze: "Gelé",
+      hintButton: "Demander un indice",
+      hintIntroDoor: (n) => `Derrière la porte ${n}…`,
+      hintPresence:    "Un dresseur ? Je sens une présence…",
+      hintConversation: "Je crois avoir entendu quelque chose…",
+      hintSmell:        "L'odeur caractéristique des Pokémon…",
+      hintNostalgia:    "Il y a comme une vague de nostalgie qui s'en dégage…",
+      hintDread:        "Une chose horrible va s'abattre sur toi.",
+      hintImmune:       "Immunisé",
     },
     en: {
       pickDoor: "Pick a door",
-      subDesc: "Curtains hide battles, heals and traps. Your choice is final.",
+      subDesc: "Curtains hide battles, heals, wild Pokémon and status rooms. Your choice is final.",
       room: "Room",
       round: "Round",
       team: "Team",
@@ -6541,19 +6664,36 @@
       bossBanner: "⚡ Zone Leader incoming!",
       healFullTitle: "Nurse encounter!",
       healFullBody: "Your whole team heals to 100% HP and any status is cured.",
-      healHalfTitle: "Healing spring",
-      healHalfBody: "Your whole team regains 50% HP (status is not cured).",
-      trapTitle: "Trap sprung!",
-      trapBody: "One of your Pokémon is afflicted with a status.",
+      healPartialTitle: "Passing healer",
+      healPartialBody: (n) => `${n === 1 ? "One Pokémon" : "Two Pokémon"} of your team heals fully and is cured of status.`,
+      toughHealTitle: "Rewarding victory",
+      toughHealBody: "Your team is fully healed after this tough fight.",
+      statusTitle: "Hostile Pokémon!",
+      statusBody: (species, status, n) => `A wild ${species} attacked! ${n === 1 ? "One of your Pokémon is" : `${n} of your Pokémon are`} afflicted: ${status}.`,
+      wildTitle: "Wild Pokémon!",
+      wildBody: "A wild Pokémon attacks.",
+      emptyTitle: "Peaceful room",
+      emptyBody: "Lucky — nobody here attacks.",
       next: "Next room",
       cancel: "Back",
       back: "Back",
       abandon: "Abandon",
       fightBrain: "Face the Zone Leader",
       fightTough: "Start the fight",
+      fightWild: "Fight the wild",
       statusPoisoned: "Poisoned",
       statusBurn: "Burned",
       statusParalysis: "Paralyzed",
+      statusSleep: "Asleep",
+      statusFreeze: "Frozen",
+      hintButton: "Ask for a hint",
+      hintIntroDoor: (n) => `Behind door ${n}…`,
+      hintPresence:    "A trainer? I sense a presence…",
+      hintConversation: "I think I heard something…",
+      hintSmell:        "The distinctive smell of Pokémon…",
+      hintNostalgia:    "There's a wave of nostalgia coming from it…",
+      hintDread:        "Something horrible is about to befall you.",
+      hintImmune:       "Immune",
     },
   };
 
@@ -6626,19 +6766,30 @@
   // Weighted random outcome for a single door at a given room index. The
   // weights shift with room progression: early rooms bias toward heals so
   // the player survives long enough to feel the mechanic; mid rooms
-  // balance combat vs utility; late rooms (11+) strip away most heals
-  // to ramp pressure before the room-14 finale.
+  // balance combat vs utility; late rooms (11+) strip heals and turn
+  // every encounter into pressure before the room-14 finale.
+  //
+  // Canonical Gen 3 Pike outcomes mirrored here:
+  //   • combat_solo      — trainer with 3 Pokémon
+  //   • combat_tough     — stronger trainer, win → team heal
+  //   • heal_full        — nurse, full heal + status cure for all 3
+  //   • heal_partial     — 1 or 2 Pokémon fully healed + status cured
+  //   • status_species   — hostile species inflicts its trademark status
+  //                        on N Pokémon (N scales with room 1-5/6-10/11+)
+  //   • wild             — single wild Pokémon encounter
+  //   • empty            — peaceful room, no fight, advance freely
   function rollSinglePikeDoor(room, facility) {
     const run = saved.frontierExt.activeRun;
     const nextRound = run.round + 1;
     const early = room <= 4;
     const late = room >= 11;
 
-    // [combat, heal_full, heal_half, trap]
+    // Order: [combat_solo, combat_tough, heal_full, heal_partial,
+    //         status_species, wild, empty]
     let weights;
-    if (early)      weights = [50, 15, 20, 15];
-    else if (late)  weights = [70, 5,  10, 15];
-    else            weights = [55, 10, 20, 15];
+    if (early)      weights = [30, 10, 10, 15, 10, 15, 10];
+    else if (late)  weights = [40, 20,  3,  7, 15, 12,  3];
+    else            weights = [35, 12,  7, 13, 13, 12,  8];
 
     const total = weights.reduce((a, b) => a + b, 0);
     const roll = Math.random() * total;
@@ -6646,17 +6797,51 @@
 
     cum += weights[0];
     if (roll < cum) {
-      return {
-        type: "combat",
-        data: { trainer: generateTrainer(nextRound, facility) },
-      };
+      return { type: "combat_solo", data: { trainer: generateTrainer(nextRound, facility) } };
     }
     cum += weights[1];
-    if (roll < cum) return { type: "heal_full", data: {} };
+    if (roll < cum) {
+      const t = generateTrainer(nextRound, facility);
+      t.tier = Math.min(5, (t.tier || 1) + 1);
+      return { type: "combat_tough", data: { trainer: t, healOnWin: true } };
+    }
     cum += weights[2];
-    if (roll < cum) return { type: "heal_half", data: {} };
-    const status = PIKE_TRAP_STATUSES[Math.floor(Math.random() * PIKE_TRAP_STATUSES.length)];
-    return { type: "trap", data: { status } };
+    if (roll < cum) return { type: "heal_full", data: {} };
+    cum += weights[3];
+    if (roll < cum) {
+      const count = Math.random() < 0.5 ? 1 : 2;
+      return { type: "heal_partial", data: { count } };
+    }
+    cum += weights[4];
+    if (roll < cum) {
+      const speciesKeys = Object.keys(PIKE_STATUS_SPECIES);
+      const species = speciesKeys[Math.floor(Math.random() * speciesKeys.length)];
+      const statuses = PIKE_STATUS_SPECIES[species];
+      const status = statuses[Math.floor(Math.random() * statuses.length)];
+      return {
+        type: "status_species",
+        data: { species, status, count: pikeStatusCountByRoom(room) },
+      };
+    }
+    cum += weights[5];
+    if (roll < cum) {
+      // Wild encounter — single Pokémon from the facility pool, scaled.
+      const diff = computeRunDifficulty(nextRound, facility);
+      const pool = getPoolForFacility(facility, diff.tier, nextRound);
+      const id = pool[Math.floor(Math.random() * pool.length)];
+      const wildTrainer = {
+        name: (window.gameLang === "fr" ? "Pokémon sauvage" : "Wild Pokémon"),
+        sprite: "wild_silhouette",
+        team: [{ id, moves: pickMovesetFor(id, diff), nature: "" }],
+        isWild: true,
+        facilityId: facility.id,
+        round: nextRound,
+        tier: diff.tier,
+        multiplier: diff.mult,
+      };
+      return { type: "wild", data: { trainer: wildTrainer } };
+    }
+    return { type: "empty", data: {} };
   }
 
   // Roll all 3 doors for a given room. Guarantees the final room is always
@@ -6691,10 +6876,18 @@
     for (let i = 0; i < PIKE_DOOR_COUNT; i++) {
       doors.push(rollSinglePikeDoor(room, facility));
     }
-    // Ensure at least 1 combat door in every room.
-    if (!doors.some((d) => d.type === "combat" || d.type === "brain" || d.type === "tough")) {
+    // Ensure at least 1 combat-ish door (solo / tough / wild) in every
+    // room — otherwise a 3×heal or 3×empty jackpot would trivialise the
+    // round. Canonical Pike guarantees an encounter eventually too.
+    const isCombatish = (d) => d && (
+      d.type === "combat_solo" || d.type === "combat_tough" ||
+      d.type === "wild" || d.type === "brain" ||
+      // Legacy (pre-rework) saves may still carry these types:
+      d.type === "combat" || d.type === "tough"
+    );
+    if (!doors.some(isCombatish)) {
       doors[Math.floor(Math.random() * doors.length)] = {
-        type: "combat",
+        type: "combat_solo",
         data: { trainer: generateTrainer(run.round + 1, facility) },
       };
     }
@@ -6712,6 +6905,7 @@
     const l = pikeL10n();
     const statusLabel = {
       poisoned: l.statusPoisoned, burn: l.statusBurn, paralysis: l.statusParalysis,
+      sleep: l.statusSleep, freeze: l.statusFreeze,
     };
     const cells = [];
     const source = run.pikeTeam || {};
@@ -6764,21 +6958,32 @@
     if (pickedIdx !== null && pickedIdx !== undefined
         && Array.isArray(run.pikeDoors) && run.pikeDoors[pickedIdx]) {
       const d = run.pikeDoors[pickedIdx];
-      if (d.type === "combat" || d.type === "brain" || d.type === "tough") {
+      const isCombatishPicked = d.type === "combat_solo" || d.type === "combat_tough"
+        || d.type === "wild" || d.type === "brain"
+        || d.type === "combat" || d.type === "tough"; // legacy
+      if (isCombatishPicked) {
         // Re-fire the committed combat directly.
         applyPikeDoor(pickedIdx, facility);
         return;
       }
       if (d.applied) {
-        // Heal/trap already resolved. Re-show the event modal without
-        // re-running the effect so the player can still click "Next".
+        // Heal/status/empty already resolved. Re-show the event modal
+        // without re-running the effect so the player can still click
+        // "Next".
         const l = pikeL10n();
-        const map = {
-          heal_full: ["heal", l.healFullTitle, l.healFullBody, "full"],
-          heal_half: ["heal", l.healHalfTitle, l.healHalfBody, "half"],
-          trap:      ["trap", l.trapTitle,     `${l.trapBody} (${({poisoned:l.statusPoisoned,burn:l.statusBurn,paralysis:l.statusParalysis}[d.data.status]) || d.data.status})`, d.data.status],
-        };
-        const m = map[d.type];
+        const statusName = (s) => ({
+          poisoned: l.statusPoisoned, burn: l.statusBurn, paralysis: l.statusParalysis,
+          sleep: l.statusSleep, freeze: l.statusFreeze,
+        })[s] || s;
+        const speciesName = (id) => (typeof format === "function" ? format(id) : id);
+        let m = null;
+        if (d.type === "heal_full")    m = ["heal", l.healFullTitle, l.healFullBody, "full"];
+        else if (d.type === "heal_partial") m = ["heal", l.healPartialTitle, l.healPartialBody(d.data.count || 1), "partial"];
+        else if (d.type === "status_species") m = ["trap", l.statusTitle, l.statusBody(speciesName(d.data.species), statusName(d.data.status), d.data.count || 1), d.data.status];
+        else if (d.type === "empty")   m = ["heal", l.emptyTitle, l.emptyBody, "empty"];
+        // Legacy fallbacks for in-progress saves:
+        else if (d.type === "heal_half") m = ["heal", l.healPartialTitle, l.healPartialBody(2), "partial"];
+        else if (d.type === "trap")      m = ["trap", l.statusTitle, `${l.statusTitle} (${statusName(d.data.status)})`, d.data.status];
         if (m) {
           showPikeEventModal(facility, m[0], m[1], m[2], m[3]);
           return;
@@ -6842,8 +7047,35 @@
           ${CURTAIN_SVG}
         </div>
       `).join("");
+      // Hint: already-revealed hint takes precedence; otherwise show the
+      // ask-button. Final rooms don't show a hint button — the room's
+      // nature is already obvious (boss / tough fight).
+      let hintHtml = "";
+      if (!isFinalRoom) {
+        if (run.pikeHint && typeof run.pikeHint.doorIdx === "number") {
+          const cat = run.pikeHint.category;
+          const hintText = {
+            presence: l.hintPresence,
+            conversation: l.hintConversation,
+            smell: l.hintSmell,
+            nostalgia: l.hintNostalgia,
+            dread: l.hintDread,
+          }[cat] || "";
+          hintHtml = `
+            <div class="frontier-ext-pike-hint revealed">
+              <span class="intro">${l.hintIntroDoor(run.pikeHint.doorIdx + 1)}</span>
+              <span class="text">${hintText}</span>
+            </div>`;
+        } else {
+          hintHtml = `
+            <div class="frontier-ext-pike-hint">
+              <button class="frontier-ext-pike-hint-btn" data-pike-hint="1">🔍 ${l.hintButton}</button>
+            </div>`;
+        }
+      }
       bottom.innerHTML = `
         <div class="frontier-ext-pike-doors">${doors}</div>
+        ${hintHtml}
         <div class="frontier-ext-run-actions">
           <button class="frontier-ext-action-btn danger" data-action="abandon">${l.abandon}</button>
         </div>
@@ -6860,6 +7092,12 @@
           setTimeout(() => applyPikeDoor(idx, facility), 280);
         });
       });
+      const hintBtn = bottom.querySelector("[data-pike-hint]");
+      if (hintBtn) {
+        hintBtn.addEventListener("click", () => {
+          requestPikeHint(facility);
+        });
+      }
       bottom.querySelectorAll("[data-action]").forEach((btn) => {
         btn.onclick = () => handleRunAction(btn.dataset.action, facility);
       });
@@ -6867,54 +7105,165 @@
     if (typeof openTooltip === "function") openTooltip();
   }
 
-  // Entry point from a curtain click. Dispatches to the right handler based
-  // on door type. Combat / brain / tough lead straight into launchCombat
-  // (which opens the team-preview menu); heal / trap show a confirmation
-  // panel then advance to the next room.
+  // Roll a hint: pick a random door in the current room, bucket its type
+  // into a category, then persist the (doorIdx, category) pair on the
+  // run so re-opening the preview keeps the same hint. Once per room —
+  // the player can't spam the button to narrow down all three doors.
+  function requestPikeHint(facility) {
+    const run = saved.frontierExt.activeRun;
+    if (!run || !Array.isArray(run.pikeDoors)) return;
+    if (run.pikeHint && typeof run.pikeHint.doorIdx === "number") {
+      // Already asked; just re-render the preview (idempotent).
+      openPikeRoomPreview(facility);
+      return;
+    }
+    const doorIdx = Math.floor(Math.random() * run.pikeDoors.length);
+    const door = run.pikeDoors[doorIdx];
+    const category = PIKE_HINT_CATEGORY[door.type] || "presence";
+    run.pikeHint = { doorIdx, category };
+    openPikeRoomPreview(facility);
+  }
+
+  // Entry point from a curtain click. Dispatches to the right handler
+  // based on door type. Combat-style doors (solo / tough / wild / brain)
+  // lead straight into launchCombat; heal / status / empty show a
+  // confirmation modal and advance to the next room on "Next".
   function applyPikeDoor(idx, facility) {
     const run = saved.frontierExt.activeRun;
     if (!run || !Array.isArray(run.pikeDoors)) return;
     const door = run.pikeDoors[idx];
     if (!door) return;
     run.pikeDoorPicked = idx;
+    const l = pikeL10n();
+    const statusName = (s) => ({
+      poisoned: l.statusPoisoned, burn: l.statusBurn, paralysis: l.statusParalysis,
+      sleep: l.statusSleep, freeze: l.statusFreeze,
+    })[s] || s;
+    const speciesName = (id) => (typeof format === "function" ? format(id) : id);
 
     switch (door.type) {
-      case "combat":
-      case "tough": {
+      case "combat_solo":
+      case "combat_tough":
+      case "wild": {
         run.upcomingTrainer = door.data.trainer;
+        // combat_tough: mark the current battle so onRunVictory knows to
+        // fully heal the team after the win.
+        run.pikePostBattleHeal = !!door.data.healOnWin;
         launchCombat(facility);
         return;
       }
       case "brain": {
-        // Let launchCombat follow its boss path — getBossRoundInfo picks the
-        // right team at run.round+1. Null out upcomingTrainer so that path
-        // fires instead of the cached random trainer.
+        // Let launchCombat follow its boss path — getBossRoundInfo picks
+        // the right team at run.round+1. Null upcomingTrainer so that
+        // path fires instead of the cached random trainer.
         run.upcomingTrainer = null;
+        run.pikePostBattleHeal = false;
         launchCombat(facility);
         return;
       }
       case "heal_full": {
         if (!door.applied) applyPikeHealRatio(1.0);
         door.applied = true;
-        showPikeEventModal(facility, "heal", pikeL10n().healFullTitle, pikeL10n().healFullBody, "full");
+        showPikeEventModal(facility, "heal", l.healFullTitle, l.healFullBody, "full");
+        return;
+      }
+      case "heal_partial": {
+        const count = door.data.count || 1;
+        if (!door.applied) applyPikeHealPartial(count);
+        door.applied = true;
+        showPikeEventModal(facility, "heal", l.healPartialTitle, l.healPartialBody(count), "partial");
+        return;
+      }
+      case "status_species": {
+        door.data.status = normalizePikeStatus(door.data.status);
+        if (!door.applied) applyPikeStatusSpecies(door.data.status, door.data.count || 1);
+        door.applied = true;
+        showPikeEventModal(
+          facility, "trap", l.statusTitle,
+          l.statusBody(speciesName(door.data.species), statusName(door.data.status), door.data.count || 1),
+          door.data.status,
+        );
+        return;
+      }
+      case "empty": {
+        door.applied = true;
+        showPikeEventModal(facility, "heal", l.emptyTitle, l.emptyBody, "empty");
+        return;
+      }
+      // Legacy: in-flight saves from before the rework.
+      case "combat":
+      case "tough": {
+        run.upcomingTrainer = door.data.trainer;
+        run.pikePostBattleHeal = door.type === "tough";
+        launchCombat(facility);
         return;
       }
       case "heal_half": {
-        if (!door.applied) applyPikeHealRatio(0.5);
+        if (!door.applied) applyPikeHealPartial(2);
         door.applied = true;
-        showPikeEventModal(facility, "heal", pikeL10n().healHalfTitle, pikeL10n().healHalfBody, "half");
+        showPikeEventModal(facility, "heal", l.healPartialTitle, l.healPartialBody(2), "partial");
         return;
       }
       case "trap": {
-        // Normalize in-place so every downstream read gets canonical key.
         door.data.status = normalizePikeStatus(door.data.status);
         if (!door.applied) applyPikeTrap(door.data.status);
         door.applied = true;
-        const l = pikeL10n();
-        const statusName = { poisoned: l.statusPoisoned, burn: l.statusBurn, paralysis: l.statusParalysis }[door.data.status] || door.data.status;
-        showPikeEventModal(facility, "trap", l.trapTitle, `${l.trapBody} (${statusName})`, door.data.status);
+        showPikeEventModal(facility, "trap", l.statusTitle, `${l.statusTitle} (${statusName(door.data.status)})`, door.data.status);
         return;
       }
+    }
+  }
+
+  // Heal exactly N Pokémon (N=1 or 2) to full HP + cure status. Picks
+  // randomly among slots that are alive (hpRatio > 0) — a fainted mon
+  // isn't eligible, which matches Gen 3 Pike where the healer targets
+  // living party members.
+  function applyPikeHealPartial(n) {
+    const run = saved.frontierExt.activeRun;
+    migratePikeTeam();
+    if (!run.pikeTeam) return;
+    const alive = ["slot1", "slot2", "slot3"].filter((sl) => {
+      const ps = run.pikeTeam[sl];
+      return ps && (ps.hpRatio || 0) > 0;
+    });
+    // Shuffle and take N. If fewer alive than N, heal all of them.
+    for (let i = alive.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [alive[i], alive[j]] = [alive[j], alive[i]];
+    }
+    const targets = alive.slice(0, n);
+    for (const sl of targets) {
+      const ps = run.pikeTeam[sl];
+      ps.hpRatio = 1.0;
+      ps.status = null;
+    }
+  }
+
+  // Apply a species-triggered status to N Pokémon, respecting type
+  // immunity. `status` is one of the PIKE_TRAP_STATUSES keys; `count` is
+  // the room-progression count (1 / 2 / 3). Prefers slots that are alive
+  // AND not already statused — if fewer eligible slots exist than the
+  // count, applies to as many as possible.
+  function applyPikeStatusSpecies(status, count) {
+    const run = saved.frontierExt.activeRun;
+    migratePikeTeam();
+    if (!run.pikeTeam) return;
+    const eligible = ["slot1", "slot2", "slot3"].filter((sl) => {
+      const ps = run.pikeTeam[sl];
+      if (!ps || !ps.pkmnId) return false;
+      if ((ps.hpRatio || 0) <= 0) return false;     // fainted — skip
+      if (ps.status) return false;                  // already statused
+      if (pikePkmnImmuneToStatus(ps.pkmnId, status)) return false;
+      return true;
+    });
+    // Shuffle, take count.
+    for (let i = eligible.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [eligible[i], eligible[j]] = [eligible[j], eligible[i]];
+    }
+    const targets = eligible.slice(0, count);
+    for (const sl of targets) {
+      run.pikeTeam[sl].status = normalizePikeStatus(status);
     }
   }
 
@@ -6955,7 +7304,7 @@
     const mid = document.getElementById("tooltipMid");
     const bottom = document.getElementById("tooltipBottom");
     const icon = kind === "heal"
-      ? (variant === "full" ? "💚" : "🌿")
+      ? (variant === "full" ? "💚" : variant === "empty" ? "🍃" : "🌿")
       : "☠️";
     const facName = lang === "fr" ? facility.nameFr : facility.nameEn;
 
@@ -7166,6 +7515,7 @@
     run.pikeRoom = (run.pikeRoom || 1) + 1;
     run.pikeDoors = null;
     run.pikeDoorPicked = null;
+    run.pikeHint = null;
 
     if (run.pikeRoom > PIKE_ROOM_COUNT) {
       // Defensive: treat as round victory so the run stays consistent.
@@ -7374,6 +7724,7 @@
     const l = pikeL10n();
     const statusLabel = {
       poisoned: l.statusPoisoned, burn: l.statusBurn, paralysis: l.statusParalysis,
+      sleep: l.statusSleep, freeze: l.statusFreeze,
     };
     for (const sl of ["slot1", "slot2", "slot3"]) {
       const card = document.getElementById(`explore-${sl}-member`);
@@ -8247,9 +8598,23 @@
     // over when room 14 is cleared. HP/status persist between rooms and
     // reset only when a full round is done.
     if (isPikeFacility(facility)) {
+      // combat_tough doors promise a full team heal if the player wins
+      // (canonical "hard solo fight, victory = heal" rule). Flag set in
+      // applyPikeDoor, cleared here regardless of fight outcome so a
+      // later normal combat never inherits a stale heal promise.
+      if (run.pikePostBattleHeal && run.pikeTeam) {
+        for (const sl of ["slot1", "slot2", "slot3"]) {
+          if (run.pikeTeam[sl]) {
+            run.pikeTeam[sl].hpRatio = 1.0;
+            run.pikeTeam[sl].status = null;
+          }
+        }
+      }
+      run.pikePostBattleHeal = false;
       run.pikeRoom = (run.pikeRoom || 1) + 1;
       run.pikeDoors = null;
       run.pikeDoorPicked = null;
+      run.pikeHint = null;
       if (run.pikeRoom <= PIKE_ROOM_COUNT) {
         // More rooms to go — keep HP/status, don't advance round.
         run.upcomingTrainer = null;
