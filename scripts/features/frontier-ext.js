@@ -5196,6 +5196,25 @@
                 state.enemyAttacks++;
               }
             } catch (e) { /* ignore */ }
+            // Player's active Pokémon just died OUTSIDE a judge verdict
+            // (normal KO from an enemy attack, possibly the enemy's 3rd
+            // action of the matchup). The counters we just tallied belong
+            // to the DEAD Pokémon; if we let them stand, the next player
+            // Pokémon comes in with inflated enemy counters on its ledger
+            // — the judge then fires on the new matchup with stale data
+            // ("0 player attacks vs 3 stale enemy attacks" → auto-win for
+            // whichever side has non-zero counters). Reset the matchup
+            // immediately so the incoming Pokémon starts from a clean
+            // slate. detectMatchupChange would eventually catch this via
+            // the slot change on the next tick, but engine-side KO
+            // switching can be deferred by the respawn timer — closing
+            // the window explicitly avoids a judge firing inside it.
+            if (prevPlayerHp > 0 && postPlayerHp <= 0) {
+              arenaResetMatchup(state);
+              state.lastPlayerSlot = null;
+              state.lastEnemySlot = null;
+              return res;
+            }
             arenaCheckJudge();
           }
         }
