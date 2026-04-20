@@ -1143,6 +1143,18 @@ window.i18n.fr.UI_PARTIALS = [
   [") equipped!", ") équipées !"],
   [") equipped", ") équipées"],
 
+  // ── Restricted move tooltip (tooltip.js:925) ───────────────────────────
+  // Même pattern que le modal plus haut : SVG injecté au milieu du texte
+  // via template literal, les nodes de texte sont splittés autour de l'icône.
+  [
+    "This move is restricted (",
+    "Cette capacité est restreinte (",
+  ],
+  [
+    ") and only one of them can be present in the active moves at a time",
+    ") et une seule d'entre elles peut être présente dans les capacités actives à la fois",
+  ],
+
   ["Litten", "Flamiaou"],
   ["Turtwig", "Tortipouss"],
   ["Froakie", "Grenousse"],
