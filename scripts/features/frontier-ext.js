@@ -10814,9 +10814,15 @@
     const onHoennTab = !!(hoennListing && getComputedStyle(hoennListing).display !== "none");
     if ((isHoennActive || hasHoennPaused || onHoennTab) && typeof window.updateHoennBF === "function") {
       window.updateHoennBF();
-    } else if (typeof updateFrontier === "function") {
-      updateFrontier();
+      return;
     }
+    // Do NOT fall back to vanilla updateFrontier just to refresh state
+    // — that triggers the "Defeat Giovanni" banner on every boot /
+    // auto-restore when the vanilla Frontier tab would have been the
+    // fallback. We only call updateFrontier when the player is
+    // actively on a Frontier-related tab (handled above via the
+    // onHoennTab branch, or by direct click handlers). Boot refresh
+    // with no runs + no visible frontier tab = silent no-op.
   }
 
   // ─── FACTORY RESTRICTED-MOVES BYPASS ──────────────────────────────────────
