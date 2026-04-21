@@ -10885,21 +10885,22 @@
     // doesn't re-set display on its own).
     const origUpdateFrontier = window.updateFrontier;
     window.updateFrontier = function (forceVanilla) {
-      // Pre-empt: pre-Giovanni but post-Oak players shouldn't hit the
-      // vanilla "Defeat Team Leader Giovanni in VS mode to unlock"
-      // banner on every F5 / auto-restore just because their last VS
-      // tab was Battle Frontier. Redirect straight to the Hoenn BF
-      // view instead — our tab is Oak-gated and available to them.
-      // A forceVanilla truthy arg bypasses this (used by the explicit
-      // "VS Zone de Combat" button inside our Hoenn toolbar so the
-      // player CAN still see the vanilla gate on purpose if they want).
+      // Pre-Giovanni guard: the vanilla function's FIRST branch (see
+      // explore.js:7287) unconditionally shows a blocking "Defeat
+      // Team Leader Giovanni in VS mode to unlock" tooltip. Called on
+      // every boot / auto-restore path (explore.js:866) when the last
+      // saved area was Frontier-typed, so pre-Giovanni players got
+      // slapped with the banner on every F5. Silent-bail here —
+      // don't show the popup, don't auto-switch tabs, don't load
+      // ZdC. The player reaches the Hoenn subtab (or the real
+      // Frontier post-Giovanni) by clicking it themselves.
+      //
+      // forceVanilla=true bypasses this and runs the vanilla path on
+      // purpose — used by our "VS Zone de Combat" button inside the
+      // Hoenn toolbar so players who WANT to check vanilla Frontier
+      // gating still can.
       try {
-        if (!forceVanilla
-            && !isFrontierUnlockedForPlayer()
-            && isHoennUnlockedForPlayer()
-            && typeof window.updateHoennBF === "function") {
-          return window.updateHoennBF();
-        }
+        if (!forceVanilla && !isFrontierUnlockedForPlayer()) return;
       } catch (e) { /* fall through to vanilla */ }
 
       const res = origUpdateFrontier.apply(this, arguments);
