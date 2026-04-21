@@ -5666,6 +5666,25 @@
       } catch (e) { /* ignore */ }
     };
     window.openTooltip = function () {
+      // Belt-and-braces suppression: the vanilla "Defeat Team Leader
+      // Giovanni in VS mode to unlock" banner is fired from two
+      // places (explore.js:4518 in setEventAreas, :7292 in
+      // updateFrontier) — both write the sentence into tooltipMid
+      // then openTooltip. We catch any openTooltip call whose mid
+      // matches that sentence, Giovanni isn't beaten, and we weren't
+      // forced, and just cancel the open.
+      try {
+        if (!isFrontierUnlockedForPlayer()) {
+          const mid = document.getElementById("tooltipMid");
+          const text = mid ? (mid.textContent || "").trim() : "";
+          if (/Defeat Team Leader Giovanni in VS mode to unlock/i.test(text)) {
+            // Reset mid so it doesn't flash next open, abort the
+            // current open entirely.
+            if (mid) mid.innerHTML = "";
+            return;
+          }
+        }
+      } catch (e) { /* fall through to open */ }
       const res = origOpen.apply(this, arguments);
       apply();
       return res;
