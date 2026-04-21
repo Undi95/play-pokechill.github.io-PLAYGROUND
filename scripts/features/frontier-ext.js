@@ -5643,6 +5643,86 @@
     };
   }
 
+  // ─── MENU LOCK DURING ACTIVE RUN ─────────────────────────────────────────
+  // While a ZdC run is in progress, every non-VS action in the overworld
+  // menu is a save-integrity hazard: Items would let the player bag-swap
+  // mid-run; Team/Dex/Genetics could shuffle species; Mystery Gift /
+  // Export Reward / Wonder Trade touch external state we can't roll back.
+  // The only legitimate exit is through VS → Hoenn → facility tile →
+  // Continue / Rest / Abandon, so we gate the menu to VS only.
+  //
+  // Defense in depth:
+  //   1. Hook `switchMenu`: refuse any id !== "vs" when activeRun exists.
+  //   2. Hook the three claim* functions that bypass switchMenu entirely.
+  //   3. Visual: mirror vanilla explore.js's `style.filter =
+  //      "brightness(0.6)"` on every non-VS menu tile so the player
+  //      sees the same grey-out they already know means "not now".
+  //      Clicks are blocked by #1/#2 above — the filter is cosmetic.
+  //   4. MutationObserver (childList only) on #menu-items keeps the
+  //      filter synced if the menu re-renders mid-run.
+  function installMenuLockDuringRun() {
+    const hasRun = () => !!(saved && saved.frontierExt && saved.frontierExt.activeRun);
+
+    // Match vanilla's gray-out mechanism (scripts/explore.js uses
+    // el.style.filter = "brightness(0.6)" to dim menus while in an
+    // area). Inline styles survive className replacements the vanilla
+    // game occasionally does on #menu-items tiles. The JS-level wraps
+    // on switchMenu + claim* are the real enforcement; the filter is
+    // just the visual cue.
+    const syncMenuLockCss = () => {
+      try {
+        const menu = document.getElementById("menu-items");
+        if (!menu) return;
+        const locked = hasRun();
+        for (const el of menu.querySelectorAll(".menu-item")) {
+          // Keep VS unlocked so the player can reach the Hoenn sub-tab
+          // where Continue / Rest / Abandon live.
+          const isVs = el.id === "menu-item-vs";
+          const shouldDim = locked && !isVs;
+          const target = shouldDim ? "brightness(0.6)" : "";
+          if (el.style.filter !== target) el.style.filter = target;
+        }
+      } catch (e) { /* ignore */ }
+    };
+    window.__frontierExtSyncMenuLock = syncMenuLockCss;
+
+    // switchMenu wrap — the primary navigation entry point.
+    if (typeof window.switchMenu === "function" && !window.__frontierExtSwitchMenuHooked) {
+      window.__frontierExtSwitchMenuHooked = true;
+      const orig = window.switchMenu;
+      window.switchMenu = function (id) {
+        if (hasRun() && id !== "vs") return;
+        return orig.apply(this, arguments);
+      };
+    }
+    // Claim-buttons bypass switchMenu and fire their own handlers — wrap
+    // each explicitly so they don't leak past the run gate.
+    for (const name of ["claimMysteryGift", "claimExportReward", "claimWonderTrade"]) {
+      if (typeof window[name] === "function" && !window["__frontierExtHooked_" + name]) {
+        window["__frontierExtHooked_" + name] = true;
+        const orig = window[name];
+        window[name] = function () {
+          if (hasRun()) return;
+          return orig.apply(this, arguments);
+        };
+      }
+    }
+    // Initial CSS pass + observer so future DOM churn picks up the lock.
+    syncMenuLockCss();
+    try {
+      const menu = document.getElementById("menu-items");
+      if (menu && typeof MutationObserver === "function") {
+        // childList only — NOT attributes. Watching attributes +
+        // classList mutations in the callback creates an infinite
+        // feedback loop (add class → observer fires → syncMenuLockCss
+        // runs → classList change → observer fires again) that
+        // completely freezes the page.
+        const mo = new MutationObserver(syncMenuLockCss);
+        mo.observe(menu, { childList: true, subtree: true });
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   // Pyramid status-persistence hook. Wild encounters bias their slot-1
   // move toward status infliction (biasPyramidWildMoveset), but vanilla
   // moveBuff caps paralysis at 2 turns and the rest at 3 — after which
@@ -10634,6 +10714,13 @@
   // rest, etc.) — routes to the Hoenn tab if the active run is in one
   // of our facilities, otherwise falls back to the vanilla frontier tab.
   function refreshActiveFrontierView() {
+    // Keep the main-menu lock CSS in sync with run state. Cheap no-op
+    // when no menu is mounted or installer hasn't run yet.
+    try {
+      if (typeof window.__frontierExtSyncMenuLock === "function") {
+        window.__frontierExtSyncMenuLock();
+      }
+    } catch (e) { /* ignore */ }
     const fe = saved && saved.frontierExt;
     const activeRun = fe && fe.activeRun;
     const pausedIds = fe && fe.pausedRuns ? Object.keys(fe.pausedRuns) : [];
@@ -10867,6 +10954,7 @@
     installPikePyramidHpRestoreHook();
     installPyramidEquipSync();
     installPyramidStatusStickHook();
+    installMenuLockDuringRun();
     installRunLockTooltipHook();
     installTeamMenuLockHook();
     installTeamMenuObserver();
