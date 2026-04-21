@@ -5631,6 +5631,17 @@
       apply();
       return res;
     };
+    // Belt + braces: if something swaps the tooltip content without
+    // going back through openTooltip (Pokechill's delete-data confirm,
+    // certain in-combat popups…), a MutationObserver re-evaluates the
+    // lock so it never sticks to a non-frontier modal.
+    try {
+      const box = document.getElementById("tooltipBox");
+      if (box) {
+        const mo = new MutationObserver(() => { apply(); });
+        mo.observe(box, { childList: true, subtree: true });
+      }
+    } catch (e) { /* ignore */ }
     window.closeTooltip = function () {
       try {
         const bg = document.getElementById("tooltipBackground");
@@ -10701,9 +10712,24 @@
   // updateVS / updateFrontier overwrite the selector's innerHTML on every
   // call, so this has to be called AFTER the vanilla rebuild — otherwise
   // the button disappears the moment the player clicks another tab.
+  // Canonical Pokechill gate: the whole Battle Frontier (and our Hoenn
+  // subtab with it) is locked until the player defeats Team Leader
+  // Giovanni in VS mode. explore.js checks this at two places with
+  // `areas.vsTeamLeaderGiovanni.defeated != true`. We mirror it so a
+  // fresh-save player doesn't see our Hoenn tab + listing divider
+  // poking through the otherwise-locked Frontier screen.
+  function isFrontierUnlockedForPlayer() {
+    try {
+      return !!(typeof areas !== "undefined"
+             && areas.vsTeamLeaderGiovanni
+             && areas.vsTeamLeaderGiovanni.defeated);
+    } catch (e) { return false; }
+  }
+
   function ensureHoennTabButton() {
     const sel = document.getElementById("vs-selector");
     if (!sel) return;
+    if (!isFrontierUnlockedForPlayer()) return;
     if (sel.querySelector(`#${HOENN_TAB_ID}`)) return;
     const lang = window.gameLang === "fr" ? "fr" : "en";
     sel.appendChild(buildHoennTabButton(lang, false));
@@ -10788,8 +10814,12 @@
     }
 
     // Make sure the Hoenn listing div exists in the DOM even before the
-    // player clicks anything.
-    ensureHoennListing();
+    // player clicks anything — but only if the Frontier is actually
+    // unlocked. On a fresh save (pre-Giovanni), we leave the Battle
+    // Frontier screen alone; vanilla shows its "Defeat Team Leader
+    // Giovanni…" lock screen and we don't want to poke a listing
+    // divider underneath it.
+    if (isFrontierUnlockedForPlayer()) ensureHoennListing();
 
     // Wrap vanilla updateFrontier: after it finishes, re-add the Hoenn
     // tab button + hide our listing AND restore display on the listing
