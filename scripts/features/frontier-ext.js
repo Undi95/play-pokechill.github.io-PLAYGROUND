@@ -10764,11 +10764,25 @@
              && areas.vsTeamLeaderGiovanni.defeated);
     } catch (e) { return false; }
   }
+  // Our own (Hoenn ZdC) gate — Professor Oak. Much earlier in the
+  // progression than Giovanni, so the Hoenn subtab is effectively
+  // always available once the player has finished the tutorial.
+  function isHoennUnlockedForPlayer() {
+    try {
+      return !!(typeof areas !== "undefined"
+             && areas.vsPokemonProfessorOak
+             && areas.vsPokemonProfessorOak.defeated);
+    } catch (e) { return false; }
+  }
 
   function ensureHoennTabButton() {
     const sel = document.getElementById("vs-selector");
     if (!sel) return;
-    if (!isFrontierUnlockedForPlayer()) return;
+    // ZdC d'Hoenn is its OWN tab with its OWN gate (Oak), even though
+    // it lives next to the vanilla Battle Frontier tab. Using Giovanni
+    // here would mean the Hoenn subtab stays invisible long after the
+    // player can legitimately run it.
+    if (!isHoennUnlockedForPlayer()) return;
     if (sel.querySelector(`#${HOENN_TAB_ID}`)) return;
     const lang = window.gameLang === "fr" ? "fr" : "en";
     sel.appendChild(buildHoennTabButton(lang, false));
@@ -10852,13 +10866,11 @@
       return;
     }
 
-    // Make sure the Hoenn listing div exists in the DOM even before the
-    // player clicks anything — but only if the Frontier is actually
-    // unlocked. On a fresh save (pre-Giovanni), we leave the Battle
-    // Frontier screen alone; vanilla shows its "Defeat Team Leader
-    // Giovanni…" lock screen and we don't want to poke a listing
-    // divider underneath it.
-    if (isFrontierUnlockedForPlayer()) ensureHoennListing();
+    // Create the Hoenn listing div once Oak has been defeated (our
+    // ZdC gate). Fresh-save / pre-Oak players don't get the listing
+    // host injected at all — keeps the vanilla pre-tutorial screens
+    // untouched.
+    if (isHoennUnlockedForPlayer()) ensureHoennListing();
 
     // Wrap vanilla updateFrontier: after it finishes, re-add the Hoenn
     // tab button + hide our listing AND restore display on the listing
@@ -10866,7 +10878,24 @@
     // style.display="none" when the player last switched away — vanilla
     // doesn't re-set display on its own).
     const origUpdateFrontier = window.updateFrontier;
-    window.updateFrontier = function () {
+    window.updateFrontier = function (forceVanilla) {
+      // Pre-empt: pre-Giovanni but post-Oak players shouldn't hit the
+      // vanilla "Defeat Team Leader Giovanni in VS mode to unlock"
+      // banner on every F5 / auto-restore just because their last VS
+      // tab was Battle Frontier. Redirect straight to the Hoenn BF
+      // view instead — our tab is Oak-gated and available to them.
+      // A forceVanilla truthy arg bypasses this (used by the explicit
+      // "VS Zone de Combat" button inside our Hoenn toolbar so the
+      // player CAN still see the vanilla gate on purpose if they want).
+      try {
+        if (!forceVanilla
+            && !isFrontierUnlockedForPlayer()
+            && isHoennUnlockedForPlayer()
+            && typeof window.updateHoennBF === "function") {
+          return window.updateHoennBF();
+        }
+      } catch (e) { /* fall through to vanilla */ }
+
       const res = origUpdateFrontier.apply(this, arguments);
       try {
         injectStyles();
@@ -10939,7 +10968,10 @@
           ${lang === "fr" ? "Dresseurs" : "Trainers"}`;
         sel.appendChild(trainersBtn);
         const bfBtn = document.createElement("div");
-        bfBtn.onclick = () => window.updateFrontier && window.updateFrontier();
+        // Force-flag bypasses our pre-Giovanni redirect, letting the
+        // player intentionally reach the vanilla Frontier (and see
+        // its lock banner if Giovanni isn't done yet).
+        bfBtn.onclick = () => window.updateFrontier && window.updateFrontier(true);
         bfBtn.innerHTML = `
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M17 22H7a2 2 0 0 1-2-2v-8.818a.6.6 0 0 0-.1-.333L3.1 8.15a.6.6 0 0 1-.1-.333V2.6a.6.6 0 0 1 .6-.6h1.8a.6.6 0 0 1 .6.6v1.8a.6.6 0 0 0 .6.6h2.8a.6.6 0 0 0 .6-.6V2.6a.6.6 0 0 1 .6-.6h2.8a.6.6 0 0 1 .6.6v1.8a.6.6 0 0 0 .6.6h2.8a.6.6 0 0 0 .6-.6V2.6a.6.6 0 0 1 .6-.6h1.8a.6.6 0 0 1 .6.6v5.218a.6.6 0 0 1-.1.333l-1.8 2.698a.6.6 0 0 0-.1.333V20a2 2 0 0 1-2 2Z"/></svg>
           ${lang === "fr" ? "VS Zone de Combat" : "Battle Frontier"}`;
