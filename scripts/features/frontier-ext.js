@@ -10927,6 +10927,47 @@
       if (++forfeitAttempts < 10) setTimeout(forfeitRetry, 250);
     };
     forfeitRetry();
+
+    // Canonical save-load integrity check. Our guardrails (rest, abandon,
+    // victory, defeat, eager saveGame on each) make it IMPOSSIBLE for
+    // activeRun to legitimately persist across a page reload without
+    // roundJustCleared=true. If loadGame pulls in an activeRun that
+    // violates that invariant, it can only have come from a mid-combat
+    // F5 / tab-close — treat as a forfeit.
+    //
+    // Pokechill invokes loadGame() from a window "load" event handler
+    // (explore.js) AFTER our DOMContentLoaded bootstrap runs. The
+    // initial forfeitRetry above therefore races against a still-empty
+    // `saved`; hooking loadGame catches the state AFTER it's been
+    // written. The setTimeout defers the forfeit until the rest of the
+    // "load" handler (team restoration, etc.) finishes, so saveGame
+    // serialises a fully-initialised runtime rather than mid-init
+    // state.
+    const installLoadGameIntegrityHook = () => {
+      if (typeof window.loadGame !== "function") {
+        setTimeout(installLoadGameIntegrityHook, 150);
+        return;
+      }
+      if (window.__frontierExtLoadGameHooked) return;
+      window.__frontierExtLoadGameHooked = true;
+      const orig = window.loadGame;
+      window.loadGame = function () {
+        const res = orig.apply(this, arguments);
+        setTimeout(() => {
+          try {
+            const processed = forfeitOnBoot();
+            if (processed && typeof saveGame === "function") {
+              // Persist the forfeit so a second F5 within the 60s
+              // auto-save window can't resurrect the run.
+              saveGame();
+            }
+            try { refreshActiveFrontierView(); } catch (e) { /* ignore */ }
+          } catch (e) { /* ignore */ }
+        }, 50);
+        return res;
+      };
+    };
+    installLoadGameIntegrityHook();
     // Saved may load asynchronously after script runs — retry the
     // sanitizer a few times over the first couple seconds so the fix
     // lands regardless of the game's init ordering.
