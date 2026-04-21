@@ -5561,6 +5561,31 @@
     };
   }
 
+  // Wipe-data cleanup: Pokechill's clearData() (save.js:333) just runs
+  // localStorage.clear() + window.location.reload(). The confirm popup
+  // ("Yeah!" button) stays visually on screen during the brief reload
+  // window, which looks like it "sticks" on the new-game state that
+  // the fresh page then renders underneath. Hooking clearData to hide
+  // #tooltipBackground BEFORE the reload kicks ensures the modal is
+  // visually gone instantly — the new-game disclaimer/starter menu
+  // that loads next is then the only thing on screen.
+  function installClearDataCleanup() {
+    if (typeof window.clearData !== "function") {
+      setTimeout(installClearDataCleanup, 200);
+      return;
+    }
+    if (window.__frontierExtClearDataHooked) return;
+    window.__frontierExtClearDataHooked = true;
+    const orig = window.clearData;
+    window.clearData = function () {
+      try {
+        const bg = document.getElementById("tooltipBackground");
+        if (bg) bg.style.display = "none";
+      } catch (e) { /* ignore */ }
+      return orig.apply(this, arguments);
+    };
+  }
+
   // Universal × lock: any time openTooltip fires while an active run
   // is in progress, add the run-lock class so the vanilla close button
   // is hidden. The player is forced to commit via the in-modal buttons
@@ -11000,6 +11025,7 @@
     installPyramidStatusStickHook();
     installMenuLockDuringRun();
     installRunLockTooltipHook();
+    installClearDataCleanup();
     installTeamMenuLockHook();
     installTeamMenuObserver();
     installTeamLockEventFilter();
