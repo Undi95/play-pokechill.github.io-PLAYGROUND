@@ -1810,7 +1810,7 @@
         display: inline-flex;
         flex-direction: column;
         align-items: flex-start;
-        gap: 0.15rem;
+        gap: 0.35rem;
         vertical-align: middle;
         margin-left: 0.2rem;
       }
@@ -1826,6 +1826,10 @@
         border-radius: 0.2rem;
         font-size: 0.85rem;
         margin-right: 0.2rem;
+        display: inline-block;
+        line-height: 1.15;
+        text-align: center;
+        vertical-align: middle;
       }
       /* Medals: the tile wrapper applies filter:hue-rotate(var(--hue)) to
          tint the whole facility card. Silver/gold metallic gradients need
@@ -3410,7 +3414,7 @@
             ${name}
           </span>
           <span>
-            <strong class="frontier-ext-streak">${streakLabel}: ${streak} / ${maxLabel}: ${maxStreak}</strong>
+            <strong class="frontier-ext-streak">${streakLabel}: ${streak}<br>${maxLabel}: ${maxStreak}</strong>
             <span class="frontier-ext-symbol ${silverClass}" title="${lang === "fr" ? `Symbole Argent (round ${silverRoundFor(facility)})` : `Silver Symbol (round ${silverRoundFor(facility)})`}">●</span>
             <span class="frontier-ext-symbol ${goldClass}" title="${lang === "fr" ? `Symbole Or (round ${goldRoundFor(facility)})` : `Gold Symbol (round ${goldRoundFor(facility)})`}">●</span>
             <span class="frontier-ext-state-pills">
