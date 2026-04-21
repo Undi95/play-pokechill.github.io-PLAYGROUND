@@ -1802,6 +1802,23 @@
         }
       }
       .frontier-ext-tile.locked .frontier-ext-heat-tag { display: none; }
+      /* Stack the heat + run-state pills vertically so narrow-screen
+         tiles don't push the brain sprite off the right edge. Heat on
+         top, PAUSED / IN PROGRESS below. Reads as one block both on
+         PC and mobile. */
+      .frontier-ext-state-pills {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.15rem;
+        vertical-align: middle;
+        margin-left: 0.2rem;
+      }
+      .frontier-ext-state-pills .frontier-ext-inprogress-tag,
+      .frontier-ext-state-pills .frontier-ext-paused-tag,
+      .frontier-ext-state-pills .frontier-ext-heat-tag {
+        margin-left: 0;
+      }
       .frontier-ext-streak {
         background: #4a4a6a;
         color: white;
@@ -3396,8 +3413,10 @@
             <strong class="frontier-ext-streak">${streakLabel}: ${streak} / ${maxLabel}: ${maxStreak}</strong>
             <span class="frontier-ext-symbol ${silverClass}" title="${lang === "fr" ? `Symbole Argent (round ${silverRoundFor(facility)})` : `Silver Symbol (round ${silverRoundFor(facility)})`}">●</span>
             <span class="frontier-ext-symbol ${goldClass}" title="${lang === "fr" ? `Symbole Or (round ${goldRoundFor(facility)})` : `Gold Symbol (round ${goldRoundFor(facility)})`}">●</span>
-            ${inProgressTag}
-            ${heatTag}
+            <span class="frontier-ext-state-pills">
+              ${heatTag}
+              ${inProgressTag}
+            </span>
           </span>
         </span>
       </div>
