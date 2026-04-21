@@ -11083,25 +11083,7 @@
     // style.display="none" when the player last switched away — vanilla
     // doesn't re-set display on its own).
     const origUpdateFrontier = window.updateFrontier;
-    window.updateFrontier = function (forceVanilla) {
-      // Pre-Giovanni guard: the vanilla function's FIRST branch (see
-      // explore.js:7287) unconditionally shows a blocking "Defeat
-      // Team Leader Giovanni in VS mode to unlock" tooltip. Called on
-      // every boot / auto-restore path (explore.js:866) when the last
-      // saved area was Frontier-typed, so pre-Giovanni players got
-      // slapped with the banner on every F5. Silent-bail here —
-      // don't show the popup, don't auto-switch tabs, don't load
-      // ZdC. The player reaches the Hoenn subtab (or the real
-      // Frontier post-Giovanni) by clicking it themselves.
-      //
-      // forceVanilla=true bypasses this and runs the vanilla path on
-      // purpose — used by our "VS Zone de Combat" button inside the
-      // Hoenn toolbar so players who WANT to check vanilla Frontier
-      // gating still can.
-      try {
-        if (!forceVanilla && !isFrontierUnlockedForPlayer()) return;
-      } catch (e) { /* fall through to vanilla */ }
-
+    window.updateFrontier = function () {
       const res = origUpdateFrontier.apply(this, arguments);
       try {
         injectStyles();
@@ -11174,10 +11156,7 @@
           ${lang === "fr" ? "Dresseurs" : "Trainers"}`;
         sel.appendChild(trainersBtn);
         const bfBtn = document.createElement("div");
-        // Force-flag bypasses our pre-Giovanni redirect, letting the
-        // player intentionally reach the vanilla Frontier (and see
-        // its lock banner if Giovanni isn't done yet).
-        bfBtn.onclick = () => window.updateFrontier && window.updateFrontier(true);
+        bfBtn.onclick = () => window.updateFrontier && window.updateFrontier();
         bfBtn.innerHTML = `
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.5" d="M17 22H7a2 2 0 0 1-2-2v-8.818a.6.6 0 0 0-.1-.333L3.1 8.15a.6.6 0 0 1-.1-.333V2.6a.6.6 0 0 1 .6-.6h1.8a.6.6 0 0 1 .6.6v1.8a.6.6 0 0 0 .6.6h2.8a.6.6 0 0 0 .6-.6V2.6a.6.6 0 0 1 .6-.6h2.8a.6.6 0 0 1 .6.6v1.8a.6.6 0 0 0 .6.6h2.8a.6.6 0 0 0 .6-.6V2.6a.6.6 0 0 1 .6-.6h1.8a.6.6 0 0 1 .6.6v5.218a.6.6 0 0 1-.1.333l-1.8 2.698a.6.6 0 0 0-.1.333V20a2 2 0 0 1-2 2Z"/></svg>
           ${lang === "fr" ? "VS Zone de Combat" : "Battle Frontier"}`;
@@ -11188,6 +11167,22 @@
         if (vsListing)       { vsListing.innerHTML = "";       vsListing.style.display = "none"; }
         if (frontierListing) { frontierListing.innerHTML = ""; frontierListing.style.display = "none"; }
         hoennListing.style.display = "";
+
+        // Oak gate — 1:1 with how vanilla Pokechill handles the
+        // Giovanni gate on Battle Frontier: if the player hasn't
+        // beaten the unlock trainer yet, don't render the facility
+        // listing at all — hide it and pop a tooltip with the unlock
+        // message. Player sees a clean "come back after Oak" screen
+        // instead of a list of locked padlock tiles.
+        if (!isUnlocked()) {
+          hoennListing.innerHTML = "";
+          hoennListing.style.display = "none";
+          // Clear our header too — nothing to describe when locked.
+          const hdr = document.getElementById("vs-menu-header");
+          if (hdr) hdr.innerHTML = "";
+          try { showLockedTooltip(); } catch (e) { /* ignore */ }
+          return;
+        }
 
         // Header — match the existing VS Frontier header shape (text only
         // is fine; vanilla updateFrontier uses a much bigger header with
