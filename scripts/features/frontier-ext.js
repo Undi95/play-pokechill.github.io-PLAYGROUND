@@ -1667,6 +1667,25 @@
   function injectStyles() {
     if (document.getElementById("frontier-ext-css")) return;
     const css = `
+      /* Mirror the vanilla #frontier-listing / #vs-listing layout so the
+         Hoenn listing row widths match the Trainers + Battle Frontier
+         tabs. Without this, the Hoenn tiles rendered at their
+         intrinsic size and overflowed the viewport on narrow mobile
+         screens (reports: text clipped on the left, tiles extending
+         past the right edge). styles.css:2759 drives the vanilla
+         containers. */
+      #frontier-hoenn-listing {
+        height: auto;
+        margin-top: 0;
+        width: 95%;
+        padding: 0rem;
+        display: flex;
+        justify-content: start;
+        align-items: center;
+        flex-direction: column;
+        gap: 0.3rem;
+        position: relative;
+      }
       /* Whole-tile hue rotation gives each facility its own colour identity. */
       .frontier-ext-tile {
         position: relative;
