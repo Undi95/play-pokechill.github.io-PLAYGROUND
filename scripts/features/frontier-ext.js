@@ -5585,16 +5585,30 @@
     // if a #prevent-tooltip-exit element exists in the DOM, so we plant
     // an invisible marker whenever a run is active. Handles both the
     // backdrop-click and Escape-key exits.
+    //
+    // CRITICAL: Pokechill itself reuses `id="prevent-tooltip-exit"` on
+    // legitimate interactive elements (e.g. the "Yeah!" wipe-data
+    // confirmation button in index.html line 528). We mark OUR blocker
+    // with a `data-frontier-ext` attribute and only remove the marked
+    // copy — otherwise apply() on a content swap would wipe Pokechill's
+    // button and leave the player staring at an empty bar.
+    const BLOCKER_MARKER = "data-frontier-ext-blocker";
     const ensureBlocker = () => {
-      if (document.getElementById("prevent-tooltip-exit")) return;
+      // If a vanilla blocker already exists (non-ours), don't duplicate.
+      const existing = document.getElementById("prevent-tooltip-exit");
+      if (existing && !existing.hasAttribute(BLOCKER_MARKER)) return;
+      if (existing) return;
       const el = document.createElement("div");
       el.id = "prevent-tooltip-exit";
+      el.setAttribute(BLOCKER_MARKER, "1");
       el.style.display = "none";
       document.body.appendChild(el);
     };
     const removeBlocker = () => {
       const el = document.getElementById("prevent-tooltip-exit");
-      if (el) try { el.remove(); } catch (e) {}
+      if (el && el.hasAttribute(BLOCKER_MARKER)) {
+        try { el.remove(); } catch (e) {}
+      }
     };
     // Detect whether the current tooltip belongs to our overlay. Any
     // ZdC-rendered modal injects at least one element whose class name
