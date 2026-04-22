@@ -41,6 +41,17 @@ _remaining_english.txt
 _merged_source.js
 _translation_audit.md
 
+# ─── ZdC / Frontier dev-only artifacts (audits, local context docs, probe output)
+# The Playwright probe + its audit markdowns live alongside the tree but
+# are never shipped; they're the dev iteration trail, regenerated ad hoc.
+_ABILITY_ACTIVATION_AUDIT.md
+_TEAM_GEN_AUDIT.md
+_TEAM_GEN_AUDIT_V2.md
+_PWT_CONTEXT.md
+_CONTEXT.md
+_probe_zdc_failures/
+_probe_factory_flow_end.png
+
 # ─── Legacy one-shot scripts kept ignored in case they come back ───
 _audit_strings.py
 _audit_dynamic.py

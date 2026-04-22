@@ -8173,12 +8173,14 @@ if (pkmn && pkmn.kabutopsB) pkmn.kabutopsB.renameFR =  `Kabutops B`;
 if (pkmn && pkmn.aerodactylB) pkmn.aerodactylB.renameFR =  `Aérodactyl B`;
 if (pkmn && pkmn.humanoid) pkmn.humanoid.renameFR =  `Humanoïde`;
 if (pkmn && pkmn.crystalOnix) pkmn.crystalOnix.renameFR =  `Onix de Cristal`;
-if (pkmn && pkmn.crystalOnix) pkmn.crystalOnix.renameFR =  `Ruban Souvenir`;
-if (pkmn && pkmn.crystalOnix) pkmn.crystalOnix.descriptionFR =  `Attribué lors d'occasions spéciales`;
-if (pkmn && pkmn.crystalOnix) pkmn.crystalOnix.renameFR =  `Ruban Endurance`;
-if (pkmn && pkmn.crystalOnix) pkmn.crystalOnix.descriptionFR =  `Attribué pour avoir atteint l'étage 30 de la Tour de Combat`;
-if (pkmn && pkmn.crystalOnix) pkmn.crystalOnix.renameFR =  `Ruban Sourire`;
-if (pkmn && pkmn.crystalOnix) pkmn.crystalOnix.descriptionFR =  `Attribué très rarement pour avoir passé beaucoup de temps ensemble`;
+// Note: the auto-extractor previously pasted six Ribbon-item translations
+// ("Ruban Souvenir" / "Ruban Endurance" / "Ruban Sourire" + their
+// descriptions) onto `pkmn.crystalOnix` by mistake — overwriting the
+// valid "Onix de Cristal" rename so players saw "Ruban Sourire" on every
+// Crystal Onix encounter. Those 6 misdirected assignments were removed.
+// If / when the matching ribbon items (item.memoryRibbon, item.enduranceRibbon,
+// item.smileRibbon) are added to the game, their translations belong on
+// item[X].renameFR / .descriptionFR — not here.
 
 // From scripts/areasDictionary.js
 if (field && field.sunny) field.sunny.renameFR =  `Ensoleillement`;
