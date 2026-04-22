@@ -1289,6 +1289,32 @@ window.i18n.fr.UI_PARTIALS = [
   [" when hit by a ", " quand touché par un "],
   ["Increases the Damage dealt by ", "Augmente les dégâts infligés de "],
   [", and nullifies the damage overtime caused by it", " et annule les dégâts sur la durée causés par celui-ci"],
+
+  // ── VS trainer card names (explore.js:6877 + 10429) ──────────────
+  // Les fiches dresseurs en mode VS affichent `areas[i].name` tel
+  // quel dans l'innerHTML, sans passer par format() — donc le
+  // renameFR des areas ne s'applique pas ici. Les infobulles d'un
+  // cran (defeat*ToUnlock) sont déjà traduites via UI_TEXT_MAP ; sans
+  // ces partials, la fiche dirait "Elite Four Lance" alors que la
+  // tooltip de déverrouillage lue juste avant parlait de "Conseil 4
+  // Peter". Partials aussi longs que possible pour éviter tout
+  // collision (p. ex. "Lance" tout seul casserait "Lance-Flammes").
+  //
+  // On ne translate QUE les dresseurs dont le nom FR canonique est
+  // déjà établi dans les defeat*ToUnlock FR ci-dessous. Les autres
+  // (Youngster Billy, Aroma Lady Jana, Ace Trainer Ricardo…) n'ont
+  // aucune tooltip FR non plus — laisser anglais garde la cohérence
+  // tant qu'un bloc FR global n'est pas ajouté.
+  ["Gym Leader Brock",       "Champion Pierre"],
+  ["Gym Leader Misty",       "Championne Ondine"],
+  ["Gym Leader Phoebe",      "Championne Spectra"],
+  ["Elite Trainer Cynthia",  "Dresseuse d'Élite Cynthia"],
+  ["Elite Four Lance",       "Conseil 4 Peter"],
+  ["Team Leader Giovanni",   "Chef de la Team Giovanni"],
+  ["Master Trainer Geeta",   "Dresseuse Maître Geeta"],
+  ["Ultra Entity Lusamine",  "Entité Ultra Elsa-Mina"],
+  ["Legend Trainer Brendan", "Dresseur Légendaire Brendan"],
+  ["Pokemon Professor Oak",  "Professeur Pokémon Chen"],
 ];
 
 const UI_PARTIALS = window.i18n.fr.UI_PARTIALS;
