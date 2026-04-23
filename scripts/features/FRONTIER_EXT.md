@@ -855,7 +855,77 @@ trainer so you never face three Luvdiscs with Dragon Claw + Thunder
 + Psychic + Close Combat. `pickMovesetFor` picks up the species'
 genuine `unrestrictedLearning` flag and hands it a full toolbox.
 
-### 13. Phase D audit — bugs found post-integration
+### 13. Phase E audit — canonical engine alignment
+
+Full pass against `explore.js` damage formula + `moveDictionary.js`
+ability definitions + `testAbility` implementation revealed that the
+enemy-side dispatch on ZdC had **systematic multiplier understates**
+and **two mis-mapped ate-family types**. The audit also confirmed the
+fundamental reality: **Pokechill's engine reads ZERO ability, item,
+nature, or IV on the enemy side** — `testAbility(target, id)` is
+hard-coded to check `team[target]` slots only; `exploreCombatWild()`
+(enemy attack) reads only `.bst.*`, `.type` (STAB), and `saved.weather`
+from the enemy Pokémon. Every ability/item effect we assign to a clone
+must therefore be dispatched by us or it's cosmetic.
+
+**Multiplier corrections** (Pokechill canonical → our Phase E fix):
+
+| Ability | Canonical | Old Phase | Now |
+|---|---|---|---|
+| `strongJaw` | ×2 on fang moves | ×1.12 flat | ×2 via affectedBy, per-mon avg |
+| `toughClaws` | ×2 on claw moves | ×1.10 flat | ×2 via affectedBy, per-mon avg |
+| `hugePower` | ×2 physical | ×1.5 | ×2 |
+| `ironFist` | ×1.5 on punch | ×1.12 | ×1.5 via affectedBy |
+| `sharpness` | ×1.5 on sharp | ×1.20 name-regex | ×1.5 via affectedBy |
+| `megaLauncher` | ×1.5 on pulse | ×1.20 name-regex | ×1.5 via affectedBy |
+| `metalhead` | ×1.5 on head | ×1.20 name-regex | ×1.5 via affectedBy |
+| `technician` | ×1.5 on BP ≤ 60 | ×1.20 helper | ×1.5 via affectedBy |
+| `ate-family` | ×1.3 on normal | ×1.25 flat | ×1.3 per-mon avg |
+| `sheerForce` | ×1.25 | ×1.30 | ×1.25 via affectedBy |
+| `skillLink` | max-multihit ≈ ×1.4 | ×1.18 | ×1.4 via affectedBy |
+
+**Why "×1.12 flat" vs "×1.5 per-mon avg" isn't the same:** the old
+approach applied a flat multiplier regardless of how many moves
+actually match. A 2-of-4-punch Iron Fist Infernape got the same
+×1.12 as a pure-punch mon — both wildly below the canonical ×1.5.
+The fix averages per-mon: a 2-of-4 punch mon gets `(2×1.5 + 2×1)/4 =
+×1.25`; a 4-of-4 punch mon gets the full `×1.5`. Still accurate to
+the engine's actual output.
+
+**Detection correction: name regex → `move[x].affectedBy`.**
+Pokechill auto-populates `affectedBy` at load (moveDictionary.js:5422+)
+for every ability → list of boosted moves. We now query it directly
+instead of fragile name regexes. Covers all move-tag abilities:
+ironFist / strongJaw / toughClaws / sharpness / megaLauncher /
+metalhead / technician / sheerForce / skillLink / reckless / libero.
+
+**Ate-family mapping fixed:**
+- `chrysilate → bug` (not rock)
+- `gloomilate → dark` (not ghost)
+
+**New canonical abilities added:**
+- `libero` ×2 on fast moves (timer < default). The "Libero + Extreme
+  Speed" synergy the user called out — auto-tagged onto every fast
+  move at moveDictionary.js:5438.
+- `reckless` ×1.5 on slow moves (timer > default). Hyper Beam, Giga
+  Impact, Fire Blast, Solar Beam, etc. Auto-tagged at :5437.
+- `normalize` ×1.3 on every move (all moves become normal-type).
+- `climaTact` +15 weather turns on switch-in when the clone's OWN
+  ability set the weather. Universal weather-rock.
+- `brittleArmor` +50% satk on status land (same pattern as marvel
+  Scale / living Shield).
+
+**Item inflation — per-mon split-aware + real `item.power()`:**
+- Type boosters: boost atk and/or satk based on how many damaging
+  moves of matching type the clone carries in each split. Charcoal
+  on a mon with 2 fire-phys + 2 fire-spec moves bumps both atk and
+  satk; on a mon with only fire-special moves, only satk.
+- Gems: extra +10% multiplier on non-STAB matching moves (canonical
+  "enable STAB on non-STAB" effect approximated).
+- Multipliers use `item[x].power()` so future pyramid-level-up items
+  scale correctly instead of the hardcoded 1.18 approximation.
+
+### 14. Phase D audit — bugs found post-integration
 
 Full audit after Phase C surfaced a cluster of issues, fixed in the
 same commit as the Factory-swap / Arena-judge / low-div fixes above.

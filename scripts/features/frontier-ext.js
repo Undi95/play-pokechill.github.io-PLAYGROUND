@@ -6727,6 +6727,48 @@
     snowCloak:     (moves, p) => (p.type||[]).some((t)=>t==="ice") ? 4 : 0,
 
     // ═════════════════════════════════════════════════════════════════
+    // PHASE E — canonical engine-key abilities using move.affectedBy.
+    // ═════════════════════════════════════════════════════════════════
+    // Libero — ×2 power on moves with timer < default (priority/fast
+    // moves like extremeSpeed, quickAttack, aquaJet, iceShard, bullet
+    // Punch, vacuumWave, sucker Punch). Score reflects number of fast
+    // moves in the set. Engine auto-tags at moveDictionary.js:5438.
+    libero:        (moves) => {
+      if (typeof ability === "undefined" || !ability.libero) return 0;
+      let n = 0;
+      for (const m of moves) {
+        if (!m || !move[m] || !(move[m].power > 0)) continue;
+        if (move[m].affectedBy && move[m].affectedBy.indexOf(ability.libero.id) !== -1) n++;
+      }
+      return n >= 2 ? 11 : n >= 1 ? 8 : 0;
+    },
+    // Reckless — ×1.5 on slow (charge) moves. Hyper Beam, Giga Impact,
+    // Fire Blast, Solar Beam, Sky Attack, Meteor Beam, Focus Punch, etc.
+    reckless:      (moves) => {
+      if (typeof ability === "undefined" || !ability.reckless) return 0;
+      let n = 0;
+      for (const m of moves) {
+        if (!m || !move[m] || !(move[m].power > 0)) continue;
+        if (move[m].affectedBy && move[m].affectedBy.indexOf(ability.reckless.id) !== -1) n++;
+      }
+      return n >= 2 ? 9 : n >= 1 ? 6 : 0;
+    },
+    // Normalize — all moves become normal + ×1.3. Universal bump, good
+    // on mons with many non-normal attacks (more moves to convert).
+    normalize:     (moves) => {
+      let n = 0;
+      for (const m of moves) if (m && move[m] && (move[m].power || 0) > 0) n++;
+      return n >= 3 ? 5 : n >= 2 ? 3 : 0;
+    },
+    // ClimaTact — user's weather lasts +15 turns. Score heavily when
+    // the clone ALSO has a weather-setter ability (synergy with own
+    // weather). Score low flat otherwise.
+    climaTact:     () => 3,
+    // Marvel Scale / Living Shield / brittle Armor — status-triggered
+    // def / sdef / satk. Already dispatched via moveBuff wrap.
+    brittleArmor:  (moves, p) => (p.type||[]).some((t)=>t==="ice"||t==="rock") ? 4 : 0,
+
+    // ═════════════════════════════════════════════════════════════════
     // PHASE B — additional damage-calc / speed / HP abilities.
     // ═════════════════════════════════════════════════════════════════
     // All dispatched via applyItemBstInflation (pre-combat BST bumps).
@@ -7209,6 +7251,36 @@
     // below — the hidden slot always respects the species pkmn.hiddenAbility).
     const isHiddenOnly = (id) => __CANONICAL_HIDDEN_ONLY.has(id);
 
+    // Phase E — Pokechill's own ability rarity tag (1=common, 2=uncommon,
+    // 3=rare) integrated into the scorer. Lower tiers heavily favour
+    // common abilities (insomnia / limber / intimidate family) and
+    // downrank flashy rare ones (tintedLens / sheerForce / skillLink /
+    // gorillaTactics / etc). Higher tiers invert the curve so bosses
+    // actually bring their signature toys. Fixes user-reported
+    // "tintedLens everywhere" + "bas niveau fait des erreurs stupides,
+    // mais à partir de rang 2/3 il faut que les teams tiennent la route".
+    const rarityMult = (id) => {
+      const ab = ability[id];
+      const r = (ab && typeof ab.rarity === "number") ? ab.rarity : 2; // default uncommon
+      if (gate === "hidden-forced") {
+        // Boss: favour rare (flashy), still allow common.
+        return r === 3 ? 1.25 : r === 2 ? 1.0 : 0.85;
+      }
+      if (gate === "hidden-allowed") {
+        // Gold: flat — any rarity.
+        return r === 3 ? 1.0 : r === 2 ? 1.0 : 1.0;
+      }
+      // Pre-silver / silver: downrank rare, uprank common. Use the diff
+      // tier to differentiate pre-silver vs silver.
+      const poolTier = diff && diff.itemPoolTier;
+      if (poolTier === "basic") {
+        // Silver
+        return r === 3 ? 0.7 : r === 2 ? 0.95 : 1.1;
+      }
+      // Pre-silver — bad teams, common abilities dominate
+      return r === 3 ? 0.4 : r === 2 ? 0.85 : 1.2;
+    };
+
     // Normal ability — scored pool, EXCLUDING the species' hidden slot.
     const candidates = [];
     const seen = new Set();
@@ -7218,7 +7290,8 @@
       if (!hasScorer(id)) return;                                 // strict active-only gate
       if (isHiddenOnly(id) && id !== defaultId) return;           // canonical-legality gate (Phase C+)
       seen.add(id);
-      const score = __ABILITY_SCORERS[id](moveIds || [], cloneMon || p);
+      const rawScore = __ABILITY_SCORERS[id](moveIds || [], cloneMon || p);
+      const score = rawScore * rarityMult(id);
       candidates.push({ id, score });
     };
     // Species default — pushed ONLY if it's in the active table.
@@ -7375,6 +7448,133 @@
     const abilitySet = new Set();
     if (Array.isArray(abilityIds)) abilityIds.forEach((a) => a && abilitySet.add(a));
     else if (abilityIds) abilitySet.add(abilityIds);
+
+    // ── Phase E — Item incompatibility filter ──────────────────────────
+    // User feedback: "jvois souvent des porteur d'amulette sans move qui
+    // inflige des debuff, metronome sans move qui up avec le temps,
+    // ralentiqueue sans moves lents, evoluroc sur une évolution finale,
+    // pierres de météo sans talent de météo, dès pipé sans raison".
+    // Fix: strip items from the pool whose trigger condition doesn't
+    // exist on this clone. Applied AFTER tier filter + dedup so each
+    // remaining item is both tier-legal AND functionally useful.
+    const incompatible = new Set();
+
+    // Weather/terrain rocks + seeds require the matching setter ability.
+    // The setWildPkmn wrap post-bumps weatherTimer only when the setter
+    // ability is present (Phase D H2 fix), so a non-setter holding the
+    // rock got zero mechanical benefit.
+    const ROCK_SETTER_REQ = {
+      heatRock: "drought", dampRock: "drizzle",
+      smoothRock: "sandStream", icyRock: "snowWarning",
+      foggySeed: "somberField",
+      electricSeed: "electricSurge", grassySeed: "grassySurge", mistySeed: "mistySurge",
+    };
+    for (const rockId of Object.keys(ROCK_SETTER_REQ)) {
+      if (!abilitySet.has(ROCK_SETTER_REQ[rockId])) incompatible.add(rockId);
+    }
+
+    // Status orbs (flameOrb / toxicOrb) require a status-triggered ability.
+    // Without one, the orb just inflicts self-damage with no upside —
+    // canonical only makes sense with guts / toxicBoost / flareBoost /
+    // poisonHeal / marvelScale / livingShield.
+    const ORB_REQUIRES = {
+      flameOrb: ["guts", "flareBoost", "marvelScale", "livingShield"],
+      toxicOrb: ["guts", "toxicBoost", "poisonHeal", "marvelScale", "livingShield"],
+    };
+    for (const [orbId, abs] of Object.entries(ORB_REQUIRES)) {
+      if (!abs.some((a) => abilitySet.has(a))) incompatible.add(orbId);
+    }
+
+    // Light Clay extends screen/barrier duration — useless without one.
+    // Pokechill's screen-family: reflect, lightScreen, auroraVeil, safeguard.
+    const SCREEN_RE = /^(reflect|lightScreen|auroraVeil|safeguard|mist)$/i;
+    const hasScreen = moves.some((m) => SCREEN_RE.test(m || ""));
+    if (!hasScreen) incompatible.add("lightClay");
+
+    // Metronome (item) boosts STACKING moves (rollout / iceBall /
+    // echoedVoice / furyCutter / tripleKick). Useless on mons that don't
+    // run any of them.
+    const STACK_RE = /^(rollout|iceBall|echoedVoice|furyCutter|tripleKick|fury Cutter)$/i;
+    const hasStacking = moves.some((m) => STACK_RE.test(m || ""));
+    if (!hasStacking) incompatible.add("metronome");
+
+    // Lagging Tail boosts SLOW moves (charge / 2-turn / high-timer). The
+    // Pokechill-specific signal is `move[x].timer > defaultPlayerMoveTimer`.
+    const __slowCap = (typeof defaultPlayerMoveTimer === "number") ? defaultPlayerMoveTimer : 2000;
+    const hasSlow = moves.some((m) => m && move[m] && typeof move[m].timer === "number" && move[m].timer > __slowCap * 1.3);
+    if (!hasSlow) incompatible.add("laggingTail");
+
+    // Power Herb speeds 0-power moves. Useless on a mon with 4 attacks.
+    const hasZeroPower = moves.some((m) => m && move[m] && (move[m].power || 0) === 0);
+    if (!hasZeroPower) incompatible.add("powerHerb");
+
+    // Gems: require a STAB move of the matching type. Non-STAB gems are
+    // canonically possible but dilute the pool — we lock to STAB-only.
+    const GEM_TYPE = {
+      bugGem:"bug", darkGem:"dark", dragonGem:"dragon", electricGem:"electric",
+      fairyGem:"fairy", fightingGem:"fighting", fireGem:"fire", flyingGem:"flying",
+      ghostGem:"ghost", grassGem:"grass", groundGem:"ground", iceGem:"ice",
+      normalGem:"normal", poisonGem:"poison", psychicGem:"psychic", rockGem:"rock",
+      steelGem:"steel", waterGem:"water",
+    };
+    const cloneTypes = (cloneMon && Array.isArray(cloneMon.type)) ? cloneMon.type : (cloneMon && cloneMon.type ? [cloneMon.type] : []);
+    for (const [gemId, t] of Object.entries(GEM_TYPE)) {
+      const isStab = cloneTypes.indexOf(t) !== -1;
+      const hasTypeMove = isStab && moves.some((m) => m && move[m] && move[m].type === t && (move[m].power || 0) > 0);
+      if (!hasTypeMove) incompatible.add(gemId);
+    }
+
+    // Type boosters: require ≥2 moves of the matching type. Gating is
+    // stricter than BST-inflation (which already checks count>=2) because
+    // we want the pick itself to reject incompatible holders, not just
+    // fall back to a zero-bump.
+    const BOOSTER_TYPE = {
+      charcoal:"fire", mysticWater:"water", miracleSeed:"grass", magnet:"electric",
+      neverMeltIce:"ice", blackBelt:"fighting", poisonBarb:"poison", softSand:"ground",
+      sharpBeak:"flying", twistedSpoon:"psychic", silverPowder:"bug", hardStone:"rock",
+      spellTag:"ghost", dragonFang:"dragon", blackGlasses:"dark", metalCoat:"steel",
+      silkScarf:"normal", fairyFeather:"fairy",
+    };
+    for (const [boosterId, t] of Object.entries(BOOSTER_TYPE)) {
+      let count = 0;
+      for (const m of moves) if (m && move[m] && move[m].type === t) count++;
+      if (count < 2) incompatible.add(boosterId);
+    }
+
+    // Eviolite only on non-final evos. Already gated in the picker, but
+    // we also strip from pool so fallback rolls don't accidentally hand
+    // a final evo an inert rock.
+    if (cloneMon && typeof cloneMon.evolve === "function") {
+      try {
+        const evoResult = cloneMon.evolve();
+        let hasEvo = false;
+        for (const key in evoResult) {
+          const stone = evoResult[key] && evoResult[key].item;
+          // A legitimate evolution without a stone (or with a non-evo
+          // stone ref) means this mon DOES evolve — Eviolite is legal.
+          if (!stone || !item[stone.id] || !item[stone.id].evo) { hasEvo = true; break; }
+        }
+        if (!hasEvo) incompatible.add("eviolite");
+      } catch (e) { incompatible.add("eviolite"); /* defensive: missing evo → final form */ }
+    } else {
+      incompatible.add("eviolite"); // no evolve function → final form
+    }
+
+    // Lucky Punch is Iron-Fist specific in the synergy picker; strip it
+    // from the generic pool for non-Iron-Fist mons so it doesn't end up
+    // on Alakazam.
+    if (!abilitySet.has("ironFist")) incompatible.add("luckyPunch");
+
+    // Loaded Dice on non-multihit is useless.
+    const isMultiHitMv = (m) => m && move[m] && Array.isArray(move[m].multihit);
+    if (!moves.some(isMultiHitMv)) incompatible.add("loadedDice");
+
+    // Apply the filter. If the filter empties the pool entirely (shouldn't
+    // happen — generic items like Leftovers / Life Orb / quickClaw / clear
+    // Amulet / mental Herb / heavyDutyBoots have no incompatibility), fall
+    // back to the unfiltered pool — better a weird item than no item.
+    const filtered = pool.filter((id) => !incompatible.has(id));
+    if (filtered.length) pool = filtered;
     const maybe = (arr) => {
       const avail = arr.filter((id) => item[id] && pool.indexOf(id) !== -1);
       return avail.length ? avail[Math.floor(Math.random() * avail.length)] : null;
@@ -7685,7 +7885,12 @@
     // itemId so we don't double-inflate item effects). ────────────────────
     const hasItem = !!itemId && !!item[itemId];
 
-    // Type-booster / gem path.
+    // Phase E — Type booster / gem path. Uses the item dict's own
+    // `subtitle: "(Type)"` tag (type boosters) and `sort: "gem"` tag
+    // (gems), with the actual item.power() multiplier — and per-mon
+    // averaged over atk/satk based on how many damaging moves of that
+    // type the clone actually carries in the matching split. No longer
+    // hardcoded to the old 1.18 / 1.10 approximations.
     if (hasItem && __TYPE_BOOSTERS.has(itemId)) {
       const BOOSTER_TYPE_MAP = {
         charcoal:"fire", mysticWater:"water", miracleSeed:"grass", magnet:"electric",
@@ -7701,13 +7906,39 @@
       };
       const t = BOOSTER_TYPE_MAP[itemId];
       if (t) {
-        // Count moves of that type. Bail if < 2 (otherwise wasted bst).
-        let count = 0;
-        for (const m of moves) if (m && move[m] && move[m].type === t) count++;
-        if (count >= 2) {
-          const mult = /Gem$/.test(itemId) ? GEM_MULT : TYPE_BOOSTER_MULT;
-          clone.bst.atk  *= mult;
-          clone.bst.satk *= mult;
+        // Count DAMAGING moves of type per split (atk vs satk get
+        // inflated separately based on their own counts).
+        let physCountOfType = 0, specCountOfType = 0;
+        let totalPhys = 0, totalSpec = 0;
+        for (const m of moves) {
+          if (!m || !move[m] || !(move[m].power > 0)) continue;
+          if (move[m].split === "physical") {
+            totalPhys++;
+            if (move[m].type === t) physCountOfType++;
+          } else if (move[m].split === "special") {
+            totalSpec++;
+            if (move[m].type === t) specCountOfType++;
+          }
+        }
+        // Real multiplier from the item's power() — lvl 1 enemy items
+        // default to 1.1, higher pyramid-equipped items go up to 1.6.
+        let rawMult = 1.1;
+        try { rawMult = item[itemId].power(); } catch (e) { /* default */ }
+        // Gems get a STAB-enable boost on non-STAB moves. If the type
+        // IS the clone's STAB, no double-bonus; if not, bump effective
+        // multiplier to reflect the "non-STAB becomes STAB" effect.
+        const cloneType = Array.isArray(clone.type) ? clone.type : (clone.type ? [clone.type] : []);
+        const isGem = /Gem$/.test(itemId);
+        const isStab = cloneType.indexOf(t) !== -1;
+        const effMult = (isGem && !isStab) ? rawMult * 1.10 : rawMult;
+        // Apply per-mon-averaged bump on each split independently.
+        if (physCountOfType > 0 && totalPhys > 0) {
+          const avgPhys = (physCountOfType * effMult + (totalPhys - physCountOfType)) / totalPhys;
+          clone.bst.atk *= avgPhys;
+        }
+        if (specCountOfType > 0 && totalSpec > 0) {
+          const avgSpec = (specCountOfType * effMult + (totalSpec - specCountOfType)) / totalSpec;
+          clone.bst.satk *= avgSpec;
         }
       }
     } else if (hasItem) {
@@ -7733,57 +7964,129 @@
     // wedge into the inline formula).
     const hasPhys = moves.some((m) => m && move[m] && move[m].split === "physical");
     const hasSpec = moves.some((m) => m && move[m] && move[m].split === "special");
-    if (abilityId === "sheerForce" && __countSecondaryEffectMoves(moves) >= 2) {
-      if (hasPhys) clone.bst.atk  *= 1.30;
-      if (hasSpec) clone.bst.satk *= 1.30;
+    // Phase E — use engine's affectedBy catalog for detection. sheerForce
+    // and technician are auto-tagged onto every move they affect at
+    // moveDictionary.js:5428/5433, so this counts the exact set the
+    // engine would boost.
+    if (abilityId === "sheerForce" && typeof ability !== "undefined" && ability.sheerForce) {
+      __applyAvgOffense(__countAffected(ability.sheerForce.id), 1.25);  // canonical ×1.25 (dict)
     }
-    if (abilityId === "technician" && __countLowBpMoves(moves) >= 2) {
-      if (hasPhys) clone.bst.atk  *= 1.20;
-      if (hasSpec) clone.bst.satk *= 1.20;
+    if (abilityId === "technician" && typeof ability !== "undefined" && ability.technician) {
+      __applyAvgOffense(__countAffected(ability.technician.id), 1.5);   // canonical ×1.5 on BP ≤ 60
     }
-    if (abilityId === "adaptability" && __anyStabMove(moves, clone)) {
-      // ≈ 2.0x vs 1.5x STAB on STAB moves only. Averaged over 4 moves: +20%.
-      if (hasPhys) clone.bst.atk  *= 1.15;
-      if (hasSpec) clone.bst.satk *= 1.15;
+    if (abilityId === "adaptability") {
+      // Canonical: STAB +0.2 (1.7 vs 1.5) — relative bump ≈ 1.133× on
+      // STAB moves only. Per-mon averaged so pure-STAB mons get the
+      // full bump and non-STAB-heavy mons get little.
+      const types = Array.isArray(clone.type) ? clone.type : (clone.type ? [clone.type] : []);
+      let stabCount = 0;
+      for (const m of moves) {
+        if (!m || !move[m] || !(move[m].power > 0)) continue;
+        if (types.indexOf(move[m].type) !== -1) stabCount++;
+      }
+      __applyAvgOffense(stabCount, 1.7 / 1.5);
     }
+    // ── Libero: ×2 on fast moves (timer < defaultPlayerMoveTimer).
+    // Engine line 2466 canonical. Auto-tagged on every move with
+    // power>0 && timer<default (moveDictionary.js:5438). This is the
+    // extremeSpeed / quickAttack / aquaJet / iceShard priority synergy
+    // the user was asking about — a Libero Dragonite with Extreme Speed
+    // effectively doubles that move's damage. We're using ×1.8 here
+    // rather than the raw ×2 because the fast-move count is usually 1-2
+    // out of 4 moves; the averaged per-mon bump gracefully scales it.
+    if (abilityId === "libero" && typeof ability !== "undefined" && ability.libero) {
+      __applyAvgOffense(__countAffected(ability.libero.id), 2.0);
+    }
+    // ── Reckless: ×1.5 on slow moves (timer > default). Auto-tagged
+    // on hyperBeam/gigaImpact/fireBlast/solarBeam/etc. at line 5437.
+    if (abilityId === "reckless" && typeof ability !== "undefined" && ability.reckless) {
+      __applyAvgOffense(__countAffected(ability.reckless.id), 1.5);
+    }
+    // ── Normalize: all moves become normal + ×1.3. Universal bump
+    // (applies to every damaging move).
+    if (abilityId === "normalize") {
+      __applyAvgOffense(__dmgMoveCount, 1.3);
+    }
+    // ── Phase E audit fix — use CANONICAL Pokechill multipliers (read
+    // from moveDictionary.js ability info + explore.js:2457-2466 damage
+    // formula). Prior phases used wildly-too-low proxies (×1.10/1.12)
+    // because we were hedging over "not every move benefits". Now we
+    // use the true ×2 / ×1.5 + per-mon averaged bumps computed via
+    // move[x].affectedBy (engine's own tag list). A 2-of-4-punch
+    // ironFist mon gets avg (2×1.5 + 2)/4 = 1.25× atk; a 4-of-4-punch
+    // Iron-Fist Infernape gets the full ×1.5.
+    const __avgBoost = (affectedCount, totalDmgMoves, mult) => {
+      if (totalDmgMoves <= 0 || affectedCount <= 0) return 1;
+      return (affectedCount * mult + (totalDmgMoves - affectedCount)) / totalDmgMoves;
+    };
+    const __countAffected = (abId) => {
+      if (!abId) return 0;
+      let n = 0;
+      for (const m of moves) {
+        if (!m || !move[m] || !(move[m].power > 0)) continue;
+        if (move[m].affectedBy && move[m].affectedBy.indexOf(abId) !== -1) n++;
+      }
+      return n;
+    };
+    const __dmgMoveCount = (function () {
+      let n = 0;
+      for (const m of moves) if (m && move[m] && (move[m].power || 0) > 0) n++;
+      return n;
+    })();
+    const __applyAvgOffense = (affectedCount, mult) => {
+      if (affectedCount <= 0) return;
+      const avg = __avgBoost(affectedCount, __dmgMoveCount, mult);
+      if (hasPhys) clone.bst.atk  *= avg;
+      if (hasSpec) clone.bst.satk *= avg;
+    };
+
     if (abilityId === "hugePower") {
-      clone.bst.atk *= 1.5;
+      clone.bst.atk *= 2.0;                                            // canonical ×2 physical
     }
-    if (abilityId === "toughClaws") {
-      clone.bst.atk *= 1.10;
+    if (abilityId === "toughClaws" && typeof ability !== "undefined" && ability.toughClaws) {
+      __applyAvgOffense(__countAffected(ability.toughClaws.id), 2.0);  // canonical ×2 on claw moves
     }
-    if (abilityId === "ironFist" && __anyPunchMove(moves)) {
-      clone.bst.atk *= 1.12;
+    if (abilityId === "ironFist" && typeof ability !== "undefined" && ability.ironFist) {
+      __applyAvgOffense(__countAffected(ability.ironFist.id), 1.5);    // canonical ×1.5 on punch
     }
-    if (abilityId === "strongJaw" && __anyBiteMove(moves)) {
-      clone.bst.atk *= 1.12;
+    if (abilityId === "strongJaw" && typeof ability !== "undefined" && ability.strongJaw) {
+      __applyAvgOffense(__countAffected(ability.strongJaw.id), 2.0);   // canonical ×2 on fang
     }
     // ── Ate-family: normal-type moves convert AND gain ~1.2x BP. Since we
     // can't wedge into the damage calc, we bump atk/satk by ~1.25 when the
     // clone has any normal-type attacking move. Fourteen branches — one per
     // converter in Pokechill. ────────────────────────────────────────────
+    // Phase E — ate-family mapping. Phase A/B/C shipped with two errors
+    // (chrysilate → rock, gloomilate → ghost) that the audit against
+    // Pokechill's own moveDictionary.js:1102-1158 revealed:
+    //   chrysilate → BUG
+    //   gloomilate → DARK
+    // Other 12 unchanged.
     const ateSet = {
       aerilate:"flying", pixilate:"fairy", galvanize:"electric", glaciate:"ice",
       pyrolate:"fire",   terralate:"ground", toxilate:"poison", hydrolate:"water",
-      ferrilate:"steel", chrysilate:"rock",  verdify:"grass",   gloomilate:"ghost",
+      ferrilate:"steel", chrysilate:"bug",   verdify:"grass",   gloomilate:"dark",
       espilate:"psychic", dragonMaw:"dragon",
     };
     if (ateSet[abilityId]) {
-      let hasNormalAtk = false;
+      // Phase E — canonical ×1.3 multiplier on normal-type moves (engine
+      // dispatches this at explore.js:2610-2625 on player side: "if
+      // ability.X.id is active and moveType==normal → moveType=X,
+      // totalPower *= 1.3"). Per-mon averaged so a 2-of-4-normal-moves
+      // galvanize gets avg (2×1.3 + 2)/4 = 1.15× instead of flat 1.25.
+      let normalCount = 0;
       for (const m of moves) {
-        if (!m || !move[m]) continue;
-        if (move[m].type === "normal" && (move[m].power || 0) > 0) { hasNormalAtk = true; break; }
+        if (!m || !move[m] || !(move[m].power > 0)) continue;
+        if (move[m].type === "normal") normalCount++;
       }
-      if (hasNormalAtk) {
-        if (hasPhys) clone.bst.atk  *= 1.25;
-        if (hasSpec) clone.bst.satk *= 1.25;
-      }
+      __applyAvgOffense(normalCount, 1.3);
     }
-    // ── Skill Link: every multihit rolls max hits. +18% atk/satk when the
-    // clone actually has one. Gated via canonical multihit detection.
-    if (abilityId === "skillLink" && moves.some(isMultiHit)) {
-      if (hasPhys) clone.bst.atk  *= 1.18;
-      if (hasSpec) clone.bst.satk *= 1.18;
+    // ── Skill Link: forces multihit moves to max hits. On a [2,5]
+    // multihit that's ≈ (5 hits / avg 3.5 hits) = ~1.43× damage. Apply
+    // via engine's affectedBy (auto-tagged at moveDictionary.js:5435
+    // onto every move with multihit[1] > multihit[0]).
+    if (abilityId === "skillLink" && typeof ability !== "undefined" && ability.skillLink) {
+      __applyAvgOffense(__countAffected(ability.skillLink.id), 1.4);
     }
     // ── Unburden: doubles speed once the item is consumed. Since many
     // enemy items aren't consumed mid-combat (choice/type-booster/etc.),
@@ -7858,25 +8161,17 @@
       if (hasPhys) clone.bst.atk  *= 1.15;
       if (hasSpec) clone.bst.satk *= 1.15;
     }
-    // ── Mega Launcher: pulse moves BP×1.5. Detected via name regex
-    // (water/dragon/origin pulse, auraSphere — matches Pokechill's
-    // movesAffectedByMegaLauncher list).
-    if (abilityId === "megaLauncher") {
-      let hasPulse = false;
-      for (const m of moves) if (m && /pulse|auraSphere/i.test(m)) { hasPulse = true; break; }
-      if (hasPulse) {
-        if (hasPhys) clone.bst.atk  *= 1.20;
-        if (hasSpec) clone.bst.satk *= 1.20;
-      }
+    // ── Mega Launcher (×1.5 on pulse moves) + Metalhead (×1.5 on head
+    // moves) — use engine's affectedBy tag list. Pokechill explicitly
+    // tags the relevant moves with `affectedBy: [ability.megaLauncher.id]`
+    // / `[ability.metalhead.id]` in moveDictionary.js (waterPulse,
+    // dragonPulse, auraSphere, originPulse, etc for pulse; ironHead,
+    // headSmash, zenHeadbutt, etc for head). Per-mon averaged.
+    if (abilityId === "megaLauncher" && typeof ability !== "undefined" && ability.megaLauncher) {
+      __applyAvgOffense(__countAffected(ability.megaLauncher.id), 1.5);
     }
-    // ── Metalhead: head/butt moves BP×1.5.
-    if (abilityId === "metalhead") {
-      let hasHead = false;
-      for (const m of moves) if (m && /head|butt/i.test(m)) { hasHead = true; break; }
-      if (hasHead) {
-        if (hasPhys) clone.bst.atk  *= 1.20;
-        if (hasSpec) clone.bst.satk *= 1.20;
-      }
+    if (abilityId === "metalhead" && typeof ability !== "undefined" && ability.metalhead) {
+      __applyAvgOffense(__countAffected(ability.metalhead.id), 1.5);
     }
     // ── Speed-up families (prankster / galeWings / neuroforce). Pokechill
     // dispatches these as "move X executes 1.5× faster" — we approximate
@@ -7981,14 +8276,10 @@
       if (hasPhys) clone.bst.atk  *= 1.05;
       if (hasSpec) clone.bst.satk *= 1.05;
     }
-    // Sharpness — sharp-named moves ×1.5 (name-regex same as metalhead).
-    if (abilityId === "sharpness") {
-      let hasSharp = false;
-      for (const m of moves) if (m && /cut|slash|scissor|wing|claw|psychoCut/i.test(m)) { hasSharp = true; break; }
-      if (hasSharp) {
-        if (hasPhys) clone.bst.atk  *= 1.20;
-        if (hasSpec) clone.bst.satk *= 1.20;
-      }
+    // Sharpness — canonical ×1.5 on sharp-tagged moves. Switch from
+    // name-regex (fragile, missed a lot) to engine's affectedBy catalog.
+    if (abilityId === "sharpness" && typeof ability !== "undefined" && ability.sharpness) {
+      __applyAvgOffense(__countAffected(ability.sharpness.id), 1.5);
     }
     // Guard family — approximated as universal +6 % def/sdef. Not type-
     // specific (we can't intercept damage-calc type-effectiveness), but
@@ -8584,6 +8875,35 @@
       }
     } catch (e) { /* ignore */ }
 
+    // Phase E — climaTact (rarity 3 hidden): user's weather lasts
+    // +15 turns. Canonical Pokechill effect from moveDictionary.js:561.
+    // Behaves like a universal rock/seed that works for ANY setter — so
+    // climaTact + drought = same net effect as drought + heatRock. When
+    // both climaTact AND a matching rock/seed are held, BOTH apply.
+    try {
+      if ((state.ability === "climaTact" || state.hiddenAbility === "climaTact")
+          && typeof saved !== "undefined" && saved && saved.weather
+          && saved.weatherTimer > 0) {
+        // Only bump if this clone's OWN weather setter is what's up —
+        // if the player set the weather, climaTact on the enemy doesn't
+        // extend it (engine line 5440 auto-tags climaTact onto any move
+        // whose hitEffect calls changeWeather, but ability-side is own-
+        // switch-in only).
+        const SETTER_FOR_WEATHER = {
+          sunny: "drought", rainy: "drizzle", sandstorm: "sandStream",
+          hail: "snowWarning", foggy: "somberField",
+          electricTerrain: "electricSurge", grassyTerrain: "grassySurge",
+          mistyTerrain: "mistySurge",
+        };
+        const setter = SETTER_FOR_WEATHER[saved.weather];
+        if (setter && (state.ability === setter || state.hiddenAbility === setter)) {
+          saved.weatherTimer += 15;
+          saved.weatherCooldown = Math.max(saved.weatherCooldown || 0, saved.weatherTimer);
+          if (typeof updateWildBuffs === "function") updateWildBuffs();
+        }
+      }
+    } catch (e) { /* ignore */ }
+
     // Orb self-statuses (burn / poison clone turn 1).
     try {
       if (state.item === "flameOrb" && typeof wildBuffs === "object") { wildBuffs.burn = Math.max(wildBuffs.burn || 0, 5); if (typeof updateWildBuffs === "function") updateWildBuffs(); }
@@ -9015,6 +9335,17 @@
           try {
             const cd = (typeof pkmn === "object") ? pkmn[cid] : null;
             if (cd && cd.bst) cd.bst.sdef = (cd.bst.sdef || 0) * 1.30;
+          } catch (e) { /* ignore */ }
+        }
+        // ── Phase E — Brittle Armor (rarity 2). Canonical "+50% satk
+        // when statused". Status-triggered, one-shot, same pattern.
+        if ((state.ability === "brittleArmor" || state.hiddenAbility === "brittleArmor")
+            && !state.brittleArmorApplied
+            && /^(burn|freeze|paralysis|poisoned|sleep)$/.test(buff)) {
+          state.brittleArmorApplied = true;
+          try {
+            const cd = (typeof pkmn === "object") ? pkmn[cid] : null;
+            if (cd && cd.bst) cd.bst.satk = (cd.bst.satk || 0) * 1.50;
           } catch (e) { /* ignore */ }
         }
       } catch (e) { /* swallow */ }
