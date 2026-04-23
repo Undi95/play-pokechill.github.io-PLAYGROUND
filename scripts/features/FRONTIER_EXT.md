@@ -855,7 +855,83 @@ trainer so you never face three Luvdiscs with Dragon Claw + Thunder
 + Psychic + Close Combat. `pickMovesetFor` picks up the species'
 genuine `unrestrictedLearning` flag and hands it a full toolbox.
 
-### 13. Legit work we're NOT doing (documented not-goals)
+### 13. Phase D audit — bugs found post-integration
+
+Full audit after Phase C surfaced a cluster of issues, fixed in the
+same commit as the Factory-swap / Arena-judge / low-div fixes above.
+Listed by severity for reviewer triage:
+
+**CRITICAL:**
+- **C1: `__reInflateClone` double-multiplied BST on status triggers.**
+  `applyItemBstInflation` is not idempotent — it multiplies atk/satk
+  every call. When guts / marvelScale / livingShield flipped their
+  state flag mid-combat, we called it a SECOND time, compounding every
+  static branch (hugePower, items, ate-family, etc). A Machamp with
+  `hugePower + guts + flameOrb` ended up at ~6.6× atk instead of the
+  intended 3.15×.
+  **Fix:** removed the status-triggered branches from
+  `applyItemBstInflation` and moved them inline in the moveBuff wrap.
+  Each trigger now applies its bump DIRECTLY (`clone.bst.atk *= 1.5`),
+  one-shot, gated on the state flag. `__reInflateClone` helper retired.
+
+- **C2: `saved.currentPkmn` left pointing at a deleted clone after
+  combat.** We wrote `saved.currentPkmn = cloneId` at setWildPkmn time
+  but never restored it. After `destroyAllEnemyClones`, the save
+  contained a dangling `__zdcEnemy_xxx` reference. Any vanilla UI path
+  reading `pkmn[saved.currentPkmn]` between combat-end and next-spawn
+  would crash.
+  **Fix:** stash the real species id on `state.prevCurrentPkmn` when
+  overwriting `saved.currentPkmn`; restore in `destroyAllEnemyClones`
+  before deleting the clone entry.
+
+**HIGH:**
+- **H1: Arena verdict `setTimeout` wasn't cancellable.** A judge fired
+  on matchup 3 could fire its `wildPkmnHp = 0` global write 4.8 s
+  later INTO an already-closed combat — instant-KO'ing whatever wild
+  the player next encountered.
+  **Fix:** stash the timer handle on `state.__judgeTimer` /
+  `state.__swapTimer`, clear on every `arenaResetState`. The callback
+  body also gates on `isInArenaRun() && arenaGetState() === state`.
+
+- **H2: Weather rock duration-extender fired even when the clone
+  didn't set the weather.** Any heatRock holder extended the player's
+  own sunny uptime — wrong design (rocks should only boost
+  enemy-initiated weather).
+  **Fix:** added a `ROCK_SETTER` map that pairs each rock with its
+  matching ability (heatRock + drought, dampRock + drizzle, …). The
+  bump now requires `state.ability` or `state.hiddenAbility` to be
+  that setter.
+
+- **H6: `installEnemyContextLeaveHook` ran `destroyAllEnemyClones`
+  BEFORE vanilla `leaveCombat`.** Inner wrap layers (from
+  `installCombatHook` / Pike-Pyramid HP snapshot / etc.) read deleted
+  clone state.
+  **Fix:** flipped to post-orig ordering — vanilla runs first, then
+  we destroy.
+
+**MEDIUM:**
+- **M1: Mega transform lost the nature stat-bumps.** When a clone
+  transformed into its mega form, `clone.bst` was wholesale replaced
+  with the mega's base bst, dropping the ±1 adjustments we wrote
+  earlier at nature-pick time. The info-row nature pill said "adamant"
+  but the bst didn't reflect it.
+  **Fix:** re-apply the nature bumps to the new bst after the mega
+  swap. Uses the same tooltip.js:1195-1215 mapping as the base nature
+  fix.
+
+- **M5: `wonderSkin` cleared ALL status buffs.** A flameOrb-burned
+  clone with wonderSkin, when hit by a Sleep move, also had its
+  pre-existing burn wiped.
+  **Fix:** only clear the specific buff that just landed, not the
+  whole status set.
+
+- **M6: moveBuff regex was substring-matching.** A future variant
+  key like `"paralysisSevere"` would have leaked through the old
+  `/burn|…/` loose test.
+  **Fix:** anchored regex (`/^(burn|…)$/`) + exact-equality checks
+  in the STATUS_IMMUNITY loop.
+
+### 14. Legit work we're NOT doing (documented not-goals)
 
 A few things we deliberately declined even when technically feasible:
 - **Dedicated `abilityDictionary.js`**: Pokechill keeps abilities
