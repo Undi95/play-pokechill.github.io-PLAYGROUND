@@ -1697,14 +1697,66 @@
     const size = 3;
     const slots = [];
     const usedIds = new Set(); // no-duplicate-species guard per trainer
+
+    // ── Phase D — "Broken low-division surprise" pick ───────────────────
+    // Pokechill's genetics rule lets B/C/D-division (low-BST) Pokémon
+    // learn ANY move — signature, egg, cross-type coverage, setup — while
+    // A/S-division mons stay inside their natural type pool. Because the
+    // facility BST-percentile slicing naturally filters OUT low-division
+    // mons from silver+ tiers, the player never actually sees one of
+    // these "small-stat-but-full-toolbox" threats despite the rule
+    // existing. User feedback: "je n'en ai croisé aucun, ce serai cool
+    // d'en croisé quelques-uns".
+    //
+    // Silver+ trainers now have a small chance (6 % per slot at silver,
+    // 10 % at gold, 15 % at boss) to ROLL one of their 3 slots from the
+    // tier-1 low-BST pool instead of the tier-appropriate pool. The
+    // picked mon runs through pickMovesetFor normally — which reads its
+    // genuine "unrestrictedLearning" flag and hands it a full 4-move
+    // toolbox. Capped at 1 surprise slot per trainer so you never face
+    // three Luvdiscs with Dragon Claw + Thunder + Psychic + Close Combat.
+    const surpriseChance =
+      diff.forceHiddenAbility ? 0.15 :
+      (diff.itemPoolTier === "full" || diff.itemPoolTier === "mid") ? 0.10 :
+      (diff.itemPoolTier === "basic") ? 0.06 : 0;
+    const LOW_DIV_POOL = getPool(1); // tier 1 = 0-50 % BST percentile (low-BST)
+    const lowDivFor = (exclude) => {
+      if (!LOW_DIV_POOL || !LOW_DIV_POOL.length) return null;
+      for (let n = 0; n < 20; n++) {
+        const pick = LOW_DIV_POOL[Math.floor(Math.random() * LOW_DIV_POOL.length)];
+        if (!pick || exclude.has(pick)) continue;
+        // Only honour the surprise pick if the species is actually
+        // low-division per Pokechill's own helper — the percentile slice
+        // overlaps a bit with A-division at the upper bound, and we don't
+        // want to fake a "surprise" on a mon that doesn't get the perk.
+        if (typeof returnPkmnDivision === "function" && typeof pkmn !== "undefined" && pkmn[pick]) {
+          try {
+            const div = returnPkmnDivision(pkmn[pick]);
+            if (/^[BCD]$/.test(div)) return pick;
+          } catch (e) { /* fall through */ }
+        }
+      }
+      return null;
+    };
+    let surpriseSlotIdx = -1;
+    if (surpriseChance > 0 && Math.random() < surpriseChance) {
+      surpriseSlotIdx = Math.floor(Math.random() * size);
+    }
+
     for (let i = 0; i < size; i++) {
       let id;
-      let safety = 0;
-      do {
-        id = pool[Math.floor(Math.random() * pool.length)] || pickFromPool(tier);
-        safety++;
-      } while (id && usedIds.has(id) && safety < 20 && pool.length > size);
-      if (!id) id = pickFromPool(tier);
+      if (i === surpriseSlotIdx) {
+        id = lowDivFor(usedIds);
+        if (!id) surpriseSlotIdx = -1;          // couldn't find one — back to normal roll
+      }
+      if (!id) {
+        let safety = 0;
+        do {
+          id = pool[Math.floor(Math.random() * pool.length)] || pickFromPool(tier);
+          safety++;
+        } while (id && usedIds.has(id) && safety < 20 && pool.length > size);
+        if (!id) id = pickFromPool(tier);
+      }
       usedIds.add(id);
       const moves = pickMovesetFor(id, diff);
       let nature = simulateNatureFor(id);
@@ -6013,6 +6065,32 @@
       } catch (e) { return 0; }
     };
 
+    // Phase D — species-locked HP reader. Used by the enemy-attack-hook to
+    // detect "the player Pokémon that was active at the START of this turn
+    // just died". readPlayerActiveHp() above reads the CURRENT active slot,
+    // which can be STALE after an auto-switch — if the engine swapped in
+    // the next player mon between prevHp and postHp reads, postHp reports
+    // the NEW mon's full HP and the KO-detection path misfires: the judge
+    // then fires against a fresh full-HP mon using the dead mon's damage
+    // ledger and rules in favour of the player ("your mon is full HP +
+    // dealt a lot of damage"), which the user correctly flagged as the
+    // "3-attack enemy kills me, judge intervenes, enemy gets KO'd anyway"
+    // bug. Locking the read to the species id captured pre-call fixes it.
+    const readPlayerHpBySpecies = (speciesId) => {
+      try {
+        if (!speciesId || typeof pkmn === "undefined" || !pkmn[speciesId]) return 0;
+        return Math.max(0, pkmn[speciesId].playerHp || 0);
+      } catch (e) { return 0; }
+    };
+    const readActivePlayerSpecies = () => {
+      try {
+        const { playerSlot } = arenaReadActiveSlots();
+        if (!playerSlot || typeof team === "undefined" || !team[playerSlot]
+            || !team[playerSlot].pkmn) return null;
+        return team[playerSlot].pkmn.id || null;
+      } catch (e) { return null; }
+    };
+
     // ── Player side: detect when team[active].turn changes → 1 move fired.
     const origPlayer = window.exploreCombatPlayer;
     window.exploreCombatPlayer = function () {
@@ -6045,6 +6123,17 @@
                 state.playerAttacks++;
               }
             } catch (e) { /* ignore */ }
+            // Phase D — mirror of the enemy-side fix: if the player's
+            // attack KO'd the enemy (wildHp dropped to 0), reset the
+            // matchup. Without this, the next enemy spawn carries stale
+            // counters from the KO turn and the first judge call on the
+            // NEW matchup uses inflated damage ledgers.
+            if ((prevWildHp || 0) > 0 && postWildHp <= 0) {
+              arenaResetMatchup(state);
+              state.lastPlayerSlot = null;
+              state.lastEnemySlot = null;
+              return res;
+            }
             arenaCheckJudge();
           }
         }
@@ -6060,11 +6149,18 @@
         const s = arenaGetState();
         if (s && (s.judgeFiring || s.arenaSwapFreezing)) return;
       }
-      let prevWildTurn = null, prevPlayerHp = 0;
+      let prevWildTurn = null, prevPlayerHp = 0, prevPlayerSpecies = null;
       if (arenaActive) {
         detectMatchupChange();
         prevWildTurn = readWildTurn();
-        prevPlayerHp = readPlayerActiveHp();
+        // Snapshot the SPECIES id of the player's active mon BEFORE orig
+        // runs. Post-orig we'll read HP by species — not by "current slot"
+        // — so an auto-switch doesn't lose the KO signal. See the comment
+        // on readPlayerHpBySpecies above.
+        prevPlayerSpecies = readActivePlayerSpecies();
+        prevPlayerHp = prevPlayerSpecies
+          ? readPlayerHpBySpecies(prevPlayerSpecies)
+          : readPlayerActiveHp();
       }
       const res = origWild.apply(this, arguments);
       if (arenaActive) {
@@ -6073,7 +6169,10 @@
           const state = arenaGetState();
           if (state && !state.judgeFiring) {
             state.enemyMoves++;
-            const postPlayerHp = readPlayerActiveHp();
+            // Species-locked post-read — survives the engine's auto-switch.
+            const postPlayerHp = prevPlayerSpecies
+              ? readPlayerHpBySpecies(prevPlayerSpecies)
+              : readPlayerActiveHp();
             state.enemyDamage += Math.max(0, prevPlayerHp - postPlayerHp);
             try {
               const area = areas[RUN_AREA_ID];
@@ -6097,7 +6196,12 @@
             // the slot change on the next tick, but engine-side KO
             // switching can be deferred by the respawn timer — closing
             // the window explicitly avoids a judge firing inside it.
-            if (prevPlayerHp > 0 && postPlayerHp <= 0) {
+            // Phase D — also catch the "active slot already switched"
+            // case where the dead mon's species != current active species;
+            // that's the signal the engine auto-switched mid-call.
+            const activeChanged = prevPlayerSpecies
+              && readActivePlayerSpecies() !== prevPlayerSpecies;
+            if ((prevPlayerHp > 0 && postPlayerHp <= 0) || activeChanged) {
               arenaResetMatchup(state);
               state.lastPlayerSlot = null;
               state.lastEnemySlot = null;
@@ -8578,6 +8682,27 @@
             const st = __enemyCloneState[cloneId];
             if (st && st.item && usedItems && usedItems.indexOf(st.item) === -1) {
               usedItems.push(st.item);
+            }
+            // ── Phase D — Factory swap fidelity. Cache the EXACT state the
+            // player fought (ability / hidden / item / nature / shiny / IV
+            // rating) on the trainer, keyed by realId. onRunVictory reads
+            // this to build pendingFactorySwap so the swap offer reflects
+            // what actually stepped onto the field — not the bare species
+            // dict default (which was showing e.g. the canonical ability
+            // instead of the clone's scorer-picked one). The trainer is
+            // replaced fresh at next battle so stale entries naturally go
+            // away. Bug flag from user:
+            // "on ne reçoit pas exactement les pokemon qu'on a vaincu".
+            if (st && trainer) {
+              trainer.__zdcDefeatedClones = trainer.__zdcDefeatedClones || {};
+              trainer.__zdcDefeatedClones[realId] = {
+                ability: st.ability || null,
+                hiddenAbility: st.hiddenAbility || null,
+                item: st.item || null,
+                nature: st.nature || null,
+                shiny: !!st.shiny,
+                ivRating: (diff && typeof diff.ivRating === "number") ? diff.ivRating : 0,
+              };
             }
           } catch (e) { /* ignore */ }
         }
@@ -13118,14 +13243,52 @@
       if (isFactoryFacility(facility)
           && run.upcomingTrainer
           && (run.battleInRound || 1) < perRound) {
+        // Phase D — Factory swap fidelity fix. Prefer the clone state we
+        // cached at setWildPkmn time (the real combat's ability / item /
+        // nature / shiny / ivRating) over the vanilla pkmn[id] defaults,
+        // so the swap card shows what the player actually fought. Fall
+        // back to the original species dict if the cache is missing
+        // (mid-run F5 reload, legacy save state, etc).
+        const defeatedClones = run.upcomingTrainer.__zdcDefeatedClones || {};
         run.pendingFactorySwap = (run.upcomingTrainer.team || []).map((r) => {
           const p = (typeof pkmn !== "undefined" && pkmn[r.id]) ? pkmn[r.id] : null;
+          const cache = defeatedClones[r.id] || null;
+          // Ability: use the clone's scorer-picked normal if cached,
+          // otherwise the species' default. This is what the rental inherits
+          // per canonical Factory rules (one ability). The hidden-slot bonus
+          // from boss fights doesn't transfer through the swap — that's
+          // always been a post-Gold flavour perk, not rental loot.
+          let abilityRef = null;
+          if (cache && cache.ability && typeof ability === "object" && ability[cache.ability]) {
+            abilityRef = ability[cache.ability];
+          } else if (p && p.ability) {
+            abilityRef = p.ability;
+          }
+          // IVs: reflect the ZdC tier — ivRating maps 1:1 to the 0-6 visual
+          // bar. Without this, every rental shows the species' raw IVs
+          // (often 0) even after a gold-tier fight.
+          let ivs;
+          if (cache && typeof cache.ivRating === "number") {
+            const v = Math.max(0, Math.min(6, cache.ivRating | 0));
+            ivs = { hp: v, atk: v, def: v, satk: v, sdef: v, spe: v };
+          } else if (p && p.ivs) {
+            ivs = { ...p.ivs };
+          } else {
+            ivs = { hp: 0, atk: 0, def: 0, satk: 0, sdef: 0, spe: 0 };
+          }
           return {
             id: r.id,
             moves: r.moves || pickMovesetFor(r.id),
-            nature: r.nature || simulateNatureFor(r.id) || "",
-            ivs: (p && p.ivs) ? { ...p.ivs } : { hp: 0, atk: 0, def: 0, satk: 0, sdef: 0, spe: 0 },
-            ability: (p && p.ability) ? p.ability : null,
+            nature: (cache && cache.nature) || r.nature || simulateNatureFor(r.id) || "",
+            ivs,
+            ability: abilityRef,
+            // Flavour extras we carry through the swap display. Not read by
+            // confirmFactorySwap (item + shiny + hidden don't transfer —
+            // rentals are un-itemised in canon), but shown on the card so
+            // the player sees the full opposing profile.
+            __zdcShiny: !!(cache && cache.shiny),
+            __zdcHeldItem: cache ? cache.item : null,
+            __zdcHiddenAbility: cache ? cache.hiddenAbility : null,
           };
         });
       }

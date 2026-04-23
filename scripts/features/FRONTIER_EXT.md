@@ -788,7 +788,74 @@ Combined with the existing tier-staggered item pool (`null` →
 and hidden-ability ramp (0 → 0.25 → 0.75 → 1.0), the progression
 feels genuinely curved rather than flat.
 
-### 10. Legit work we're NOT doing (documented not-goals)
+### 10. Factory swap fidelity
+
+**Problem.** After defeating a Factory trainer, the swap modal shows
+the opponent's 3 Pokémon with their "default" ability + raw IVs from
+`pkmn[id]`, NOT the actual stats the clone fought with. Player
+feedback: "on ne reçoit pas exactement les pokemon qu'on a vaincu
+comme choix".
+
+**What we did.** At `setWildPkmn` wrap time, after the clone is
+created, snapshot the effective state onto
+`trainer.__zdcDefeatedClones[realId]`:
+```js
+{ ability, hiddenAbility, item, nature, shiny, ivRating }
+```
+When `onRunVictory` builds `pendingFactorySwap`, it reads from the
+snapshot cache first, falling back to the species default only when
+the cache is missing (mid-run F5 reload on stale save state). The
+rental inherits the cached `ability` + `nature` + IV rating mapped
+to the 0-6 visual bar. Items, shiny, and hidden ability don't
+transfer (canonical Factory rule), but they show on the swap card
+as flavour so the player sees the full profile of what they beat.
+
+### 11. Arena judge firing after player KO
+
+**Problem.** When the enemy's 3rd move KO'd the player on turn 3 of
+a matchup, the judge sometimes fired anyway, computed the verdict
+against the NEW (auto-switched-in) player mon, saw full HP +
+inherited damage ledger from the dead mon, and ruled in the player's
+favour — the enemy then got KO'd despite having already killed the
+active mon. User feedback.
+
+**Root cause.** `readPlayerActiveHp()` read from
+`arenaReadActiveSlots().playerSlot` — which points at the CURRENT
+active slot. When the engine auto-switched the dead mon to the next
+bench mon BEFORE our post-orig HP read, we saw the bench mon's full
+HP. The KO-detection `prevPlayerHp > 0 && postPlayerHp <= 0` then
+failed to trigger the early reset, the judge fired, and the damage
+ledger (attached to the dead mon) wrongly favoured the player.
+
+**What we did.** Added a species-locked HP reader
+(`readPlayerHpBySpecies(speciesId)`). The enemy-attack hook now
+snapshots the active species id BEFORE orig runs, then reads HP by
+species post-orig — survives the auto-switch. A secondary detector
+fires when `readActivePlayerSpecies() !== prevPlayerSpecies`, which
+is the unambiguous "engine already switched" signal. Either detector
+resets the matchup counters and bypasses the judge. Same mirror fix
+applied to the player-attack path for KO'ing the enemy.
+
+### 12. Broken low-division surprise slots
+
+**Problem.** Pokechill's genetics rule lets B/C/D-division (low-BST)
+Pokémon learn ANY move — signature, egg, cross-type coverage,
+setup — while A/S-division mons stay inside their natural type
+pool. Our facility pool uses BST percentile slicing, which naturally
+filters low-division mons OUT of silver+ tiers. Result: the rule
+existed but the player never saw one of these
+"small-stat-but-full-toolbox" threats. User feedback: "je n'en ai
+croisé aucun, ce serai cool d'en croisé quelques-uns".
+
+**What we did.** `generateTrainer` now rolls (at silver+) a small
+probability (6 % / 10 % / 15 % at silver / gold / boss) that ONE of
+the trainer's 3 slots is picked from the tier-1 low-BST pool
+instead of the tier-appropriate pool. Capped at 1 surprise slot per
+trainer so you never face three Luvdiscs with Dragon Claw + Thunder
++ Psychic + Close Combat. `pickMovesetFor` picks up the species'
+genuine `unrestrictedLearning` flag and hands it a full toolbox.
+
+### 13. Legit work we're NOT doing (documented not-goals)
 
 A few things we deliberately declined even when technically feasible:
 - **Dedicated `abilityDictionary.js`**: Pokechill keeps abilities
