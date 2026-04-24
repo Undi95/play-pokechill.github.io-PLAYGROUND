@@ -1310,10 +1310,10 @@ window.i18n.fr.UI_PARTIALS = [
   ["Gym Leader Phoebe",      "Championne Spectra"],
   ["Elite Trainer Cynthia",  "Dresseuse d'Élite Cynthia"],
   ["Elite Four Lance",       "Conseil 4 Peter"],
-  ["Team Leader Giovanni",   "Chef de la Team Giovanni"],
-  ["Master Trainer Geeta",   "Dresseuse Maître Geeta"],
+  ["Team Leader Giovanni",   "Chef de la Team Rocket Giovanni"],
+  ["Master Trainer Geeta",   "Maîtresse en Chef Alisma"],
   ["Ultra Entity Lusamine",  "Entité Ultra Elsa-Mina"],
-  ["Legend Trainer Brendan", "Dresseur Légendaire Brendan"],
+  ["Legend Trainer Brendan", "Dresseur Légendaire Brice"],
   ["Pokemon Professor Oak",  "Professeur Pokémon Chen"],
 ];
 
@@ -3292,23 +3292,23 @@ window.i18n.fr.GAME_UI = {
     defTotal: "DEF Total",
     defaultOption: "défaut",
     defeatBrendanToUnlock:
-      "Vainquez le Dresseur Légendaire Brendan en mode VS pour débloquer",
+      "Vainquez le Dresseur Légendaire Brice en mode VS pour débloquer",
     defeatBrockToUnlock:
       "Vainquez le Champion Pierre en mode VS pour débloquer",
     defeatEliteFourLance: "Vainquez le Conseil 4 Peter en VS pour débloquer",
     defeatGeetaToUnlock:
-      "Vainquez la Dresseuse Maître Geeta en mode VS pour débloquer",
+      "Vainquez la Maîtresse en Chef Alisma en mode VS pour débloquer",
     defeatGiovanniToUnlock:
-      "Vainquez le Chef de la Team Giovanni en mode VS pour débloquer",
+      "Vainquez le Chef de la Team Rocket Giovanni en mode VS pour débloquer",
     defeatGiovanniToUnlockFrontier:
-      "Battez le Boss Giovanni en mode VS pour débloquer",
+      "Battez le Chef de la Team Rocket Giovanni en mode VS pour débloquer",
     defeatLanceToUnlock: "Battez Lance du Conseil 4 en mode VS pour débloquer",
     defeatLanceToUnlock2:
       "Vainquez le Conseil 4 Peter en mode VS pour débloquer",
     defeatLanceToUnlockMenu:
       "Battez Lance du Conseil 4 en mode VS pour débloquer",
     defeatLusamineToUnlock:
-      "Battez la Fondation Æther Lusamine en mode VS pour débloquer",
+      "Battez l'Entité Ultra Elsa-Mina en mode VS pour débloquer",
     defeatMistyToUnlock:
       "Vainquez la Championne Ondine en mode VS pour débloquer",
     defeatPhoebeToUnlock: "Vainquez la Championne Spectra en VS pour débloquer",
@@ -6593,7 +6593,7 @@ if (item && item.safeguardTm) item.safeguardTm.renameFR =  `CT Rune Protect`;
 if (item && item.lightScreenTm) item.lightScreenTm.renameFR =  `CT Mur Lumière`;
 if (item && item.hydratationMemory) item.hydratationMemory.renameFR =  `Mémoire Hydratation`;
 if (item && item.sandVeilMemory) item.sandVeilMemory.renameFR =  `Mémoire Voile Sable`;
-if (item && item.snowCloakMemory) item.snowCloakMemory.renameFR =  `Mémoire Cape Neige`;
+if (item && item.snowCloakMemory) item.snowCloakMemory.renameFR =  `Mémoire Rideau Neige`;
 if (item && item.marvelScaleMemory) item.marvelScaleMemory.renameFR =  `Mémoire Écaille Spéciale`;
 if (item && item.livingShieldMemory) item.livingShieldMemory.renameFR =  `Mémoire Bouclier Vivant`;
 if (item && item.bigPecksMemory) item.bigPecksMemory.renameFR =  `Mémoire Cœur de Coq`;
@@ -6804,7 +6804,7 @@ if (pkmn && pkmn.spearow) pkmn.spearow.renameFR =  `Piafabec`;
 if (pkmn && pkmn.fearow) pkmn.fearow.renameFR =  `Rapasdepic`;
 if (pkmn && pkmn.ekans) pkmn.ekans.renameFR =  `Abo`;
 if (pkmn && pkmn.arbok) pkmn.arbok.renameFR =  `Arbok`;
-if (pkmn && pkmn.spikyPichu) pkmn.spikyPichu.renameFR =  `Pichu Kogeki`;
+if (pkmn && pkmn.spikyPichu) pkmn.spikyPichu.renameFR =  `Pichu Troizépi`;
 if (pkmn && pkmn.pichu) pkmn.pichu.renameFR =  `Pichu`;
 if (pkmn && pkmn.pikachu) pkmn.pikachu.renameFR =  `Pikachu`;
 if (pkmn && pkmn.pikachuGmax) pkmn.pikachuGmax.renameFR =  `Pikachu Gigamax`;
