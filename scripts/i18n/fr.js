@@ -8381,3 +8381,40 @@ if (window.gameLang === 'fr') {
 };
 window.i18n.fr.applyRenames();
 
+// --- Save-leak prevention (Phase 2026-04-24) ---
+// Pokechill's save serialises team / frontier / preview slots by storing
+// REFERENCES to dict entries (team.slot.pkmn = pkmn[id], not just the id
+// string). Our renameFR/descriptionFR annotations used to be enumerable
+// own-properties on those dict entries, so JSON.stringify captured them
+// and leaked 96+ translation strings into every save. Convert both to
+// non-enumerable AFTER applyRenames so the in-memory lookup keeps
+// working while JSON.stringify ignores them completely.
+(function __i18nFRMakeRenameNonEnumerable() {
+  const convert = (obj) => {
+    if (!obj || typeof obj !== "object") return;
+    for (const key of ["renameFR", "descriptionFR"]) {
+      if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+      const desc = Object.getOwnPropertyDescriptor(obj, key);
+      if (!desc || desc.enumerable === false) continue;
+      const val = obj[key];
+      try {
+        delete obj[key];
+        Object.defineProperty(obj, key, {
+          value: val, enumerable: false, writable: true, configurable: true,
+        });
+      } catch (e) { /* non-configurable — leave as-is */ }
+    }
+  };
+  const walkDict = (d) => {
+    if (!d || typeof d !== "object") return;
+    for (const k in d) convert(d[k]);
+  };
+  walkDict(typeof ability !== "undefined" ? ability : null);
+  walkDict(typeof move    !== "undefined" ? move    : null);
+  walkDict(typeof item    !== "undefined" ? item    : null);
+  walkDict(typeof pkmn    !== "undefined" ? pkmn    : null);
+  walkDict(typeof areas   !== "undefined" ? areas   : null);
+  walkDict(typeof field   !== "undefined" ? field   : null);
+  walkDict(typeof season  !== "undefined" ? season  : null);
+})();
+

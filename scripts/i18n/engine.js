@@ -10,6 +10,62 @@
 
 window.gameLang = localStorage.getItem("pokechill-game-lang") || "en";
 
+// --- Save cleanup: strip leaked renameFR / descriptionFR (Phase 2026-04-24) ---
+// Pokechill's save serialises team / frontier / preview slots by storing
+// REFERENCES to dict entries (team.slot.pkmn = pkmn[id], not just the id
+// string). Before we made renameFR/descriptionFR non-enumerable in fr.js
+// (also part of this phase), those properties were enumerable and got
+// captured by JSON.stringify, leaking 90+ translation strings into every
+// save. This walker self-heals already-corrupted saves at load-time,
+// without touching any vanilla game file. Fires once on script load +
+// re-runs if the vanilla loadGame() is invoked later (save import path).
+(function __i18nCleanSaveRenameFRLeak() {
+  const STRIP_KEYS = ["renameFR", "descriptionFR"];
+  const MAX_DEPTH = 24;
+  const seen = new WeakSet();
+  const strip = (obj, depth) => {
+    if (!obj || typeof obj !== "object") return;
+    if (depth > MAX_DEPTH) return;
+    if (seen.has(obj)) return;
+    seen.add(obj);
+    if (Array.isArray(obj)) { for (let i = 0; i < obj.length; i++) strip(obj[i], depth + 1); return; }
+    for (const key of STRIP_KEYS) { if (Object.prototype.hasOwnProperty.call(obj, key)) delete obj[key]; }
+    for (const k in obj) strip(obj[k], depth + 1);
+  };
+  const cleanAll = () => {
+    try { if (typeof saved !== "undefined" && saved) strip(saved, 0); } catch (e) { /* ignore */ }
+    try { if (typeof team  !== "undefined" && team)  strip(team,  0); } catch (e) { /* ignore */ }
+    try {
+      const raw = localStorage.getItem("gameData");
+      if (raw && (raw.indexOf("renameFR") !== -1 || raw.indexOf("descriptionFR") !== -1)) {
+        const data = JSON.parse(raw);
+        strip(data, 0);
+        localStorage.setItem("gameData", JSON.stringify(data));
+      }
+    } catch (e) { /* ignore */ }
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", cleanAll);
+  } else {
+    cleanAll();
+  }
+  const wrap = () => {
+    if (typeof window.loadGame !== "function" || window.__i18nLoadGameWrapped) return false;
+    window.__i18nLoadGameWrapped = true;
+    const orig = window.loadGame;
+    window.loadGame = function () {
+      const r = orig.apply(this, arguments);
+      try { cleanAll(); } catch (e) { /* ignore */ }
+      return r;
+    };
+    return true;
+  };
+  if (!wrap()) {
+    const iv = setInterval(() => { if (wrap()) clearInterval(iv); }, 200);
+    setTimeout(() => { try { clearInterval(iv); } catch (e) {} }, 10000);
+  }
+})();
+
 function setGameLang(lang) {
   if (lang !== "en" && lang !== "fr") return;
   window.gameLang = lang;
